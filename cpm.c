@@ -105,6 +105,7 @@ byte bdos_code[] = {
 
 #define BDOS_ORG 0xfe00
 #define BIOS_ORG 0xff00
+#define BIOS_CNT 17
 
 #define DMY_DPB   (BDOS_ORG + 16)
 #define DMY_DPB_SFT (DMY_DPB + 2)
@@ -1008,7 +1009,7 @@ byte cpm_getch( void)
 	    switch ( getch()) {
 	    case 72: c = 'E' - 0x40; break; /* UP */
 	    case 80: c = 'X' - 0x40; break; /* DOWN */
-	    case 75: c = 'S' - 0x40; break; /* LEFT */
+	    case 75: c = 8 /*'S' - 0x40*/; break; /* LEFT */            /* 2019 / ORION-128: 8 instead of ^S for LEFT */
 	    case 77: c = 'D' - 0x40; break; /* RIGHT */
 	    case 82: c = 'V' - 0x40; break; /* INS */
 	    case 83: c = '\x7f';     break; /* DEL */ /* 2012.03 bug-fix by N.Fujita */
@@ -1081,25 +1082,30 @@ void cpm_putch( int c)
 	case '\x0c': w32_left(); break;
 	case '\x1a': w32_cls( 2); break;
 	case '\x1b': esc_stat = ST_ESC; break;
+        case '\x1f': w32_cls(2);                        /* 2019 / VT52 of ORION-128: 0A - CLS+HOME ; 1F - CLS+HOME  */
 	case '\x1e': w32_gotoxy(1,1); break;
 	default: w32_putch((byte)c); break;
 	}
 	return;
     case ST_ESC:
 	switch ( c) {
+//        case 'E':                                       /* 2019/ VT52 of ORION-128:  CLS (аналог 0C) */
 	case '*': w32_cls( 2); break;
+        case 'H': w32_gotoxy(1,1); break;               /* 2019/ VT52 of ORION-128:  HOME (без очистки экрана) */
+	case 'Y':                                       /* 2019 - VT52 gotoxy */
 	case '=': esc_stat = ST_EQ; return;
 	case '(': SetConsoleTextAttribute( hConOut, w32_attr() | 8); break;
 	case ')': SetConsoleTextAttribute( hConOut, w32_attr() & ~8); break;
 	case 't':
+        case 'K':                                       /* 2019/ VT52 of ORION-128: стирание до конца строки (вкл-я позицию курсора) */
 	case 'T': w32_clrln( 0); break;
-	case 'y':
-	case 'Y': w32_cls( 0); break;   // 2012.03 add 
+        case 'J':                                       /* 2019/ VT52 of ORION-128: стирание до конца экрана (включая позицию курсора) */
+	case 'y': w32_cls( 0); break;   // 2012.03 add
 	case 'D': w32_down(); break;
 	case 'E': w32_scroll( -1); break;
 	case 'M': w32_up(); break;
 	case 'R': w32_scroll( 1); break;
-	case '[': arg_n = 0; args[ 0] = args[ 1] = 0; 
+	case '[': arg_n = 0; args[ 0] = args[ 1] = 0;
 		  esc_stat = ST_ANSI; return;
 	default: if (debug_flag) printf( "ESC%c", c); break;
 	}
@@ -1272,7 +1278,7 @@ int main( int argc, char *argv[])
 
     /* setup BDOS code */
     p = BDOS_ORG;
-    mem[ p++] = 0xED; mem[ p++] = 0xED; mem[ p++] = 0;		/* CALLN 0 */
+    mem[ p++] = 0xED; mem[ p++] = 0xED; /*mem[ p++] = 0; */	/* CALLN 0 */
     mem[ p] = 0xC9;						/* RET */
 
     mem[ DMY_DPB] = 64;
@@ -1283,11 +1289,11 @@ int main( int argc, char *argv[])
 
     /* setup BIOS code */
     p = BIOS_ORG;
-    q = p + 3*17;
-    for ( i = 0; i < 17; i++) {
+    q = p + 3*BIOS_CNT;
+    for ( i = 0; i < BIOS_CNT; i++) {
 	mem[ p++] = 0xC3; setword( mem[ p++], q);	     /*   JP l */
 	mem[ q++] = 0xED; mem[ q++] = 0xED;
-				mem[ q++] = (byte)(1+i);     /*l: CALLN 1+i */
+			      /* mem[ q++] = (byte)(1+i); */ /*l: CALLN 1+i */
 	mem[ q++] = 0xC9;				     /*   RET */
     }
 
@@ -1299,7 +1305,6 @@ int main( int argc, char *argv[])
     /* reg.x.pc */ PC = 0x100;
     st=5;
     while (st != EMST_STOP) {
-        OneOP=1;                                        /* Step by step */
         Z80run();
         if (StopCode) {
 	  if (StopCode==STOP_HALT) {			/* -- HALT -- */
@@ -1312,7 +1317,7 @@ int main( int argc, char *argv[])
           }
         }
         else {
-	  if ( (word)PC == BDOS_ORG) {				/* -- BDOS CALL -- */
+	  if ( (word)PC == BDOS_ORG+2) {				/* -- BDOS CALL -- */
 	    /* reg.x.hl */ HL = 0;
 	    switch ( /* reg.b.c */ (byte)BC ) {
 	    case  0: return 0;				/* boot */
@@ -1338,6 +1343,12 @@ int main( int argc, char *argv[])
 		    cpm_putch( /* reg.b.e */ (byte)DE);
 		}
 		break;
+            case  7:
+                *((byte*)&HL) = mem[ 3];
+                break;
+            case  8:
+                mem[ 3] = (byte)DE;
+                break;
 	    case  9: 					/* string out */
 		for ( i = (word)DE; mem[ i] != '$'; i++) cpm_putch( mem[ i]);
 		break;
@@ -1423,6 +1434,11 @@ DEBUGOUT( stderr, "BDOS: create file %c:'%11.11s'.-> %02x\n",
 DEBUGOUT( stderr, "BDOS: get alloc tbl\n");
 		HL = DMY_ALLOC;
 		break;
+            case 28:
+            case 29:
+            case 30:
+                HL = 0;
+                break;
 	    case 31:					  /* get disk prm */
 DEBUGOUT( stderr, "BDOS: get disk prm\n");
 		frameup_dpb_alloc();
@@ -1479,7 +1495,7 @@ DEBUGOUT( stderr, " with 0 -> %02x\n", /* reg.b.l */ (byte)HL);
 	    }
 	    /* reg.b.a */ ((byte*)&AF)[1] = /* reg.b.l */ (byte)HL; /* reg.b.b */ ((byte*)&BC)[1] = /* reg.b.h */ ((byte*)&HL)[1];
 	  } else if ( (word)PC >= BIOS_ORG ) {			/* -- BIOS CALL -- */
-	    switch ( q=((word)PC-BIOS_ORG) ) {
+	    switch ( q=((word)PC-(3*BIOS_CNT)-BIOS_ORG-2) ) {
 	    case  0: 					  /* cold boot */
 	    case  3:					  /* warm boot */
 		if ( pause_flag) while ( cpm_getch() >= ' ');
@@ -1504,7 +1520,7 @@ DEBUGOUT( stderr, " with 0 -> %02x\n", /* reg.b.l */ (byte)HL);
 		/* reg.b.a */ ((byte*)&AF)[1] = cpm_rdr_in();
 		break;
 	    default:
-		fprintf( stderr, "ERROR: Unsupported BIOS call: %d(%d)\n", (word)PC, q);
+		if (q/3<=BIOS_CNT) fprintf( stderr, "ERROR: Unsupported BIOS call: %x(N%d)\n", (word)PC, q/3);
 		return -1;
 	    }
           }  

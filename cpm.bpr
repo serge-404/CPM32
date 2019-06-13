@@ -78,7 +78,7 @@ Comments=
 DebugSourceDirs=$(BCB)\source\vcl
 
 [Parameters]
-RunParams=-D c hello.c
+RunParams=-D sed.com
 HostApplication=
 RemoteHost=
 RemotePath=
