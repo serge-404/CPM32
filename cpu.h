@@ -56,11 +56,11 @@ int32 DE1; /* alternate DE register                        */
 int32 HL1; /* alternate HL register                        */
 int32 IFF; /* Interrupt Flip Flop                          */
 int32 IR;  /* Interrupt (upper) / Refresh (lower) register */
+int32 PrevPC;
 int32 Status = 0; /* Status of the CPU 0=running 1=end request 2=back to CCP */
 int32 Debug = 0;
 int32 Break = -1;
 int32 Step = -1;
-/*int32 OneOP = 1;*/
 int32 StopCode = 0;
 
 /*
@@ -1466,17 +1466,18 @@ void Z80debug(void) {
 }
 #endif
 
-/*static inline*/ void Z80run(void) {
+void Z80run(void) {
 	register uint32 temp = 0;
 	register uint32 acu;
 	register uint32 sum;
 	register uint32 cbits;
 	register uint32 op;
 	register uint32 adr;
+	uint32 PPC;
 
 	/* main instruction fetch/decode loop */
 	while (!Status) {	/* loop until Status != 0 */
-
+                PrevPC=PPC; PPC=PC;
 #ifdef DEBUG
 		if (PC == Break) {
 			_puts(":BREAK at ");
