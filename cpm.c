@@ -1204,6 +1204,16 @@ void help( void)
     exit( 1);
 }
 
+char* CharUpperX(char* st)
+{
+  char* ss=st;
+  while (ss && *ss) {
+    *ss=toupper(*ss);
+    ss++;
+  }
+  return st;
+}
+
 int main( int argc, char *argv[])
 {
     int st, i, p, q;
@@ -1246,7 +1256,7 @@ int main( int argc, char *argv[])
     /* 2012.03 force to uppercase option */
     if ( uppercase_flag) {
         int j;
-        for ( j = i + 1; j < argc; j++) CharUpper( argv[ j]);
+        for ( j = i + 1; j < argc; j++) CharUpperX( argv[ j]);
     }
 
                                    /* setup FCB1,FCB2   */
