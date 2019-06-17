@@ -91,6 +91,16 @@ void io_output( int add, int data) {
     exit( -1);
 }
 
+/* word[8] DPH; */
+#define DPH_XLT 0      /* DW	xlt	;Address of sector translation table */
+#define DPH_WS1 1      /* DW	0,0,0	;Used as workspace by CP/M */
+#define DPH_WS2 2
+#define DPH_WS3 3
+#define DPH_BUF 4      /* DW	dirbuf	;Address of a 128-byte sector buffer; this is the same for all DPHs in the system. */
+#define DPH_DPB 5      /* DW	dpb	;Address of the DPB giving the format of this drive. */
+#define DPH_CSV 6      /* DW	csv	;Address of the directory checksum vector for this drive. (set=0) */
+#define DPH_ALV 7      /* DW	alv	;Address of the allocation vector for this drive. */
+
 #define EMST_BDOS EMST_FUNC
 #define EMST_BIOS_BASE (EMST_FUNC+1)
 
@@ -103,6 +113,7 @@ void io_output( int add, int data) {
 #define BDOS_ORG 0xff00                         // 0xfe00
 #define BIOS_CNT 17
 #define BIOS_ORG 0x10000-(3*BIOS_CNT)-3         // 0xff00
+#define BIOS_DPH BIOS_ORG-16                    // 16=sizeof(TDPH)
 
 #define DMY_DPB   (BDOS_ORG + 16)
 #define DMY_DPB_SFT (DMY_DPB + 2)
@@ -1361,6 +1372,9 @@ int main( int argc, char *argv[])
     mem[ DMY_DPB_MAX+1] = (byte)(MAXBLK >> 8);
 
     /* setup BIOS code */
+    *((word*)&mem[BIOS_DPH+DPH_WS1])=0;                      /* DW	0,0,0	;Used as workspace by CP/M */
+    *((word*)&mem[BIOS_DPH+DPH_WS2])=0;
+    *((word*)&mem[BIOS_DPH+DPH_WS3])=0;
     p = BIOS_ORG;
     for ( i = 0; i < BIOS_CNT; i++) {
 	mem[ p++] = 0xC3;
@@ -1569,34 +1583,64 @@ DEBUGOUT( stderr, " with 0 -> %02x\n", /* reg.b.l */ (byte)HL);
 	    /* reg.b.a */ ((byte*)&AF)[1] = /* reg.b.l */ (byte)HL; /* reg.b.b */ ((byte*)&BC)[1] = /* reg.b.h */ ((byte*)&HL)[1];
 	  } else if ( (word)PC >= (p=BIOS_ORG) ) {			/* -- BIOS CALL -- */
 	    switch ( q=((word)PrevPC-(word)p) ) {
-	    case  0: 					  /* cold boot */
-	    case  3:					  /* warm boot */
+	    case  0: 					  /* cold boot */       /* 0 */
+	    case  3:					  /* warm boot */       /* 1 */
 		if ( pause_flag) while ( cpm_getch() >= ' ');
 		return  retcode_flag == RC_HITECH ? *(word *)(mem + 0x80) :
 			retcode_flag == RC_BDSC && abort_submit ? 2 : 0;
-	    case  6:		/* const */
+	    case  6:		/* const */                                     /* 2 */
                 /* reg.b.a */ ((byte*)&AF)[1] = cpm_const();
                 break;
-	    case  9:		/* conin */
+	    case  9:		/* conin */                                     /* 3 */
 		/* reg.b.a */ ((byte*)&AF)[1] = cpm_getch();
                 break;
-	    case  12:		/* conout */
+	    case  12:		/* conout */                                    /* 4 */
 		cpm_putch( /* reg.b.c */ (byte)BC);
 		break;
-	    case  15: 		/* list */
+	    case  15: 		/* list */                                      /* 5 */
 		cpm_lst_out( /* reg.b.c */ (byte)BC);
 		break;
-	    case  18: 		/* punch */
+	    case  18: 		/* punch */                                     /* 6 */
 		cpm_pun_out( /* reg.b.e */ (byte)DE);
 		break;
-	    case  21: 		/* reader */
+	    case  21: 		/* reader */                                    /* 7 */
 		/* reg.b.a */ ((byte*)&AF)[1] = cpm_rdr_in();
+		break;
+            case  24:           /* home */                                      /* 8 */
+            case  30:           /* settrk */                                    /* 10 */
+            case  33:           /* setsec */                                    /* 11 */
+                break;
+            case  27:           /* seldisk */                                   /* 9 */
+                HL=0;
+                if ( (byte)BC >= MAXDRV) break;
+                if ( cpm_drive[ (byte)BC] == NULL) {
+	          if ( cpm_disk_vct == 0) setup_disk_vct();
+	          if ( cpm_drive[ (byte)BC] == NULL) break;
+                }
+                frameup_dpb_alloc();
+                *((word*)&mem[BIOS_DPH+DPH_XLT])=0;         /* DW	xlt	;Address of sector translation table */
+                *((word*)&mem[BIOS_DPH+DPH_BUF])=128;       /* DW	dirbuf	;Address of a 128-byte sector buffer; this is the same for all DPHs in the system. */
+                *((word*)&mem[BIOS_DPH+DPH_DPB])=DMY_DPB;   /* DW	dpb	;Address of the DPB giving the format of this drive. */
+                *((word*)&mem[BIOS_DPH+DPH_CSV])=0;         /* DW	csv	;Address of the directory checksum vector for this drive. (set=0) */
+                *((word*)&mem[BIOS_DPH+DPH_ALV])=DMY_ALLOC; /* DW	alv	;Address of the allocation vector for this drive. */
+                cpm_disk_no = (byte)BC;
+                HL=BIOS_DPH;
+                break;
+            case  36:           /* setDMA */                                    /* 12 */
+		cpm_dma_addr = (word)BC;
+                HL=0;
+		break;
+            case  45:           /* lststat */                                   /* 15 */
+                ((byte*)&AF)[1] = 0;
+		break;
+            case  48:           /* sectran */                                   /* 16 */
+                HL=(word)BC;
 		break;
 	    default:
 		if (q/3<=BIOS_CNT) fprintf( stderr, "ERROR: Unsupported BIOS call: %x(N%d)\n", (word)PrevPC, q/3);
 		return -1;
 	    }
-          }  
+          }
 	}
     }
     return 0;
