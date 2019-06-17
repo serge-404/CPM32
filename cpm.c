@@ -132,7 +132,7 @@ byte cpm_usr_no = 0;
 byte cpm_disk_no = 'B'-'A';
 word cpm_dma_addr = 0x80;
 word cpm_version = 0x22;
-
+int R1715=0;
 word cpm_disk_vct = 0;
 char *cpm_drive[ MAXDRV];
 
@@ -145,7 +145,7 @@ char filename2[ 1024];
 
 #define CPMPATH "CPMPATH"
 
-static unsigned char forOri[]={
+static unsigned char oriKoi[]={
   0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF,
   0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF,
   0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF,
@@ -943,7 +943,7 @@ WORD w32_attr( void)
 }
 
 
-enum { ST_START, ST_NOP, ST_CHAR, ST_ESC, ST_EQ, ST_EQ2, ST_ANSI};
+enum { ST_START, ST_NOP, ST_CHAR, ST_ESC, ST_EQ, ST_EQ2, ST_ANSI, ST_EQR};
 
 byte color_table[] = { 0, 4, 2, 6, 1, 5, 3, 7};
 byte color_table2[] = { 0, 4, 1, 5, 2, 6, 3, 7};
@@ -1121,8 +1121,9 @@ byte cpm_gets( byte *buf)
 
 void cpm_putch( int c)
 {
-    static byte esc_stat, arg_n, cc;
+    static byte esc_stat, arg_n;
     static byte args[ 8];
+    word cc;
 
     switch ( esc_stat) {
     case ST_NOP:if ( c != '\r') putchar((char)c);
@@ -1137,26 +1138,39 @@ void cpm_putch( int c)
     case ST_CHAR:
     	switch ( c) {
 	case '\x0b': w32_up(); break;
-	case '\x0c': w32_left(); break;
+	case '\x0c': if (R1715) w32_cls( 2);
+                     else w32_left();
+                     break;
 	case '\x1a': w32_cls( 2); break;
 	case '\x1b': esc_stat = ST_ESC; break;
-        case '\x1f': w32_cls(2);                        /* 2019 / VT52 of ORION-128: 0A - CLS+HOME ; 1F - CLS+HOME  */
+        case '\x1f': w32_cls(2);                        /* 2019 / VT52 of ORION-128: 1F - CLS+HOME  */
 	case '\x1e': w32_gotoxy(1,1); break;
-	default: w32_putch((c>128)&&(!NoKOI) ? forOri[c & 0x7f] : (char)c); break;
+	default: w32_putch((c>128)&&(!NoKOI) ? oriKoi[c & 0x7f] : (char)c); break;
 	}
 	return;
+    case ST_EQR:
+	args[ 1] = (byte)(c - 0x80 + 1);
+	w32_gotoxy( args[ 1], args[ 0]);
+	break;
     case ST_ESC:
+      if (c>127) {                                        /* ROBOTRON-1757 GotoXY */
+         R1715=TRUE;
+	 args[ 0] = (byte)(c - 0x80 + 1);
+         esc_stat = ST_EQR;
+         return;
+      }
+      else
 	switch ( c) {
-//        case '6': if (!inversed) {                       /* 2019/ VT52 of ORION-128: INVERSE ON */
-//                    inversed=TRUE;
-//                    SetConsoleTextAttribute( hConOut, w32_attr() | BACKGROUND_BLUE /*COMMON_LVB_REVERSE_VIDEO*/);
-//                    break;
-//                  }
-//        case '7': if (inversed) {                        /* 2019/ VT52 of ORION-128: INVERSE OFF */
-//                    inversed=FALSE;
-//                    SetConsoleTextAttribute( hConOut, w32_attr() & ~BACKGROUND_BLUE /*~COMMON_LVB_REVERSE_VIDEO*/);
-//                    break;
-//                  }
+        case '6': if (inversed) break;                      /* 2019/ VT52 of ORION-128: INVERSE ON */
+                  inversed=TRUE;
+                  if (cc=w32_attr())                        /* swap bgIRGB with fgIRGB because COMMON_LVB_REVERSE_VIDEO bit not working */
+                      SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc | COMMON_LVB_REVERSE_VIDEO */
+                  break;
+        case '7': if (!inversed) break;                     /* 2019/ VT52 of ORION-128: INVERSE OFF */
+                  inversed=FALSE;
+                  if (cc=w32_attr())
+                      SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc & ~COMMON_LVB_REVERSE_VIDEO */
+                  break;
 //        case 'E':                                      /* 2019/ VT52 of ORION-128:  CLS (аналог 0C) */
 	case '*': w32_cls( 2); break;
         case 'H': w32_gotoxy(1,1); break;                /* 2019/ VT52 of ORION-128:  HOME (без очистки экрана) */
