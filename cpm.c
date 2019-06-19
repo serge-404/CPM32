@@ -29,6 +29,7 @@
 #ifndef __linux__
 #include <windows.h>
 #define CH_SLASH '\\'
+#define F_OK 0
 #else
 #include <ctype.h>
 #include <libgen.h>
