@@ -28,6 +28,23 @@
 
 #ifndef __linux__
 #include <windows.h>
+#define CH_SLASH '\\'
+#else
+#include <ctype.h>
+#include <libgen.h>
+#define CH_SLASH '/'
+typedef unsigned int	UINT;
+typedef unsigned char	UCHAR;
+typedef unsigned char	BYTE;
+typedef unsigned short	USHORT;
+typedef short			SHORT;
+typedef unsigned short	WORD;
+typedef unsigned long	ULONG;
+typedef unsigned long	DWORD;
+typedef struct _COORD {
+    SHORT X;
+    SHORT Y;
+} COORD, *PCOORD;
 #endif
 
 #include <stdio.h>
@@ -35,9 +52,15 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#ifdef __linux__
+#include <unistd.h>
+#include <dirent.h>
+#include <sys/statvfs.h>
+#else
 #include <io.h>
-#include <fcntl.h>
 #include <conio.h>
+#endif
+#include <fcntl.h>
 
 #ifdef EM180
 #include "em180.h"
@@ -196,18 +219,29 @@ char* koi2alt(char* strn)
 
 char *auto_drive_assign( char **arg)
 {
+#ifdef __linux__
+    struct stat statbuf;
+#endif
     DWORD att;
     char *p;
     static char argbuf[ 256];
     static char *argp = argbuf;
     static int n = 2;
 
-    if ( !no_auto_assign && ( p = strrchr( *arg, '\\')) != NULL) {
+    if ( !no_auto_assign && ( p = strrchr( *arg, CH_SLASH)) != NULL) {
 	*p = '\0';
+#ifdef __linux__
+	att = stat(	*arg, &statbuf);
+#else
 	att = GetFileAttributes( *arg);
-	*p = '\\';
+#endif
+	*p = CH_SLASH;
 	if ( *arg == p || 
+#ifdef __linux__
+	    ( !att && ( statbuf.st_mode & S_IFDIR ))) {
+#else
 	    ( att != (DWORD)-1 && ( att & FILE_ATTRIBUTE_DIRECTORY))) {
+#endif
 	    cpm_drive[ n] = *arg;
 	    *arg = argp;
 	    argp += sprintf( argp, "%c:%.124s", n++ + 'A', ++p) + 1;
@@ -232,14 +266,122 @@ void setup_disk_vct( void)
     }
 }
 
+char* CharUpperX(char* st)
+{
+  char* ss=st;
+  while (ss && *ss) {
+    *ss=toupper(*ss);
+    ss++;
+  }
+  return st;
+}
+
+#ifdef __linux__
+/* Constants for MSC pathname functions */
+#define _MAX_PATH       260
+#define _MAX_DRIVE      3
+#define _MAX_DIR        256
+#define _MAX_FNAME      256
+#define _MAX_EXT        256
+void _splitpath(char *path, char *drive, char *dir, char *name, char *ext)
+{
+	char* cc;
+	strncpy(name, cc=basename(path) ? cc: "", _MAX_FNAME);
+	strncpy(dir,  cc=dirname(path) ? cc: "", _MAX_DIR);
+	if (cc=strstr(name, ".")) {
+		strncpy(ext, cc, _MAX_EXT);
+		*cc='\0';
+	}
+}
+
+char *buildname(char* dirnm, char* filenm)
+{
+	char *cp;
+	static char buf[_MAX_DIR];
+
+	if ((dirnm == NULL) || (*dirnm == '\0'))
+		return filenm;
+	if (filenm == NULL)
+		return dirnm;
+	if ((cp = strrchr(filenm, '/')) != NULL)
+		filenm = cp + 1;
+	strcpy(buf, dirnm);
+	strcat(buf, "/");
+	strcat(buf, filenm);
+	return buf;
+}
+
+void _makepath(char *path, char *drive, char *dir, char *name, char *ext)
+{
+	strncpy(path, buildname(dir,name), _MAX_DIR);
+	if (ext) strncat(path, ext, _MAX_EXT/2);
+}
+
+/* Find file in pathes:
+ * 1. /name or ./name or ../name is already qualified names
+ * 2. else search in all pathes described in env var PATH (if this
+ *    var is not exist, _PATH_DEFPATH is used)
+ * 3. else search in current directory
+ * 4. else return NULL (execve() interpretes NULL as non existent file!)
+ */
+char* findPath(char* path, char* env)
+{
+	char *p, *envp;
+	static char name[_MAX_DIR+1];
+
+	if (*path == '/' ||   	/* qualified name */
+	    *path == '.')
+		return path;
+	/* search for pathes list */
+	if ((envp = getenv(env)) == NULL)
+		envp = CPMPATH;
+	/* lookup all pathes */
+	while (*envp) {
+		p = name; 
+		while (*envp && (*p = *envp++) != ':') {
+			if ((uint)(p - name) >= sizeof(name))
+				break;
+			++p;
+		}
+		if (*--p != '/')
+			*++p = '/';
+		++p;
+		if ((p - name) + strlen(path) >= sizeof(name))
+			break;
+		strcpy(p, path);
+		if (access(name, F_OK) == 0)
+			return name;
+	}
+    	if (access(path, F_OK) == 0)	/* file exist in current dir */
+    		return name;
+	return NULL;
+}
+
+char* _searchenv(char *file, char *varname, char *buf)
+{
+	char* cc;
+    return strncpy(buf, cc=findPath(file,varname) ? cc : "", _MAX_DIR);
+}
+
+int stricmp(char* s1, char* s2)
+{
+	return strcmp(CharUpperX(s1),s2);
+}
+#endif
+
 int load_program( char *pfile)
 {
     FILE *fp;
-    char drv[ _MAX_DRIVE], dir[ _MAX_DIR], fname[ _MAX_FNAME], ext[ _MAX_EXT];
+#ifdef __linux__
+    char* drv="\0";
+#else
+    char drv[ _MAX_DRIVE];
+#endif	
+	char dir[ _MAX_DIR], fname[ _MAX_FNAME], ext[ _MAX_EXT];
 
     _splitpath( pfile, drv, dir, fname, ext);
-    if ( drv[ 0] == '\0' && dir[ 0] == '\0') {
-	if ( ext[ 0] == '\0') {
+   if ( drv[ 0] == '\0' && dir[ 0] == '\0') {
+	 if ( ext[ 0] == '\0') {
 	    _makepath( filename2, drv, dir, fname, "cpm");
 	    _searchenv( filename2, CPMPATH, filename);
 	    if ( filename[ 0] == '\0') {
@@ -266,7 +408,7 @@ int load_program( char *pfile)
     fread( mem + 0x100, 1, BDOS_ORG-0x100, fp);
     fclose( fp);
 
-    if ( stricmp( ext, ".com") == 0) cpm_version = 0x122;
+    if ( stricmp( ext, ".COM") == 0) cpm_version = 0x122;
     cpm_drive[ 0] = (char *)malloc( strlen( drv) + strlen( dir) + 1);
     _makepath( cpm_drive[ 0], drv, dir, NULL, NULL);
     cpm_drive[ 1] = "";
@@ -313,7 +455,7 @@ char *mk_filename( char *s, byte *fcb)
     }
     strcpy( s, cpm_drive[ i]);
     s += i = strlen( s);
-    if ( i && s[ -1] != '\\' && s[ -1] != '/' && s[ -1] != ':') *s++ = '/';
+    if ( i && s[ -1] != CH_SLASH && s[ -1] != '/' && s[ -1] != ':') *s++ = '/';
     dir = s;
 
     for ( j = 8; j >= 1 && fcb[ j] == '?'; j--);
@@ -349,6 +491,64 @@ struct FCB {
     byte ex, s1, s2, rc, d[ 16];
     byte cr, r0, r1, r2;
 };
+
+#ifdef __linux__
+
+#define HANDLE DIR*
+#define INVALID_HANDLE_VALUE (void*)0
+#define FILE_ATTRIBUTE_DIRECTORY S_IFDIR
+#define FILE_ATTRIBUTE_HIDDEN 0
+#define chsize ftruncate
+
+typedef struct _WIN32_FIND_DATAA {
+    DWORD dwFileAttributes;
+    DWORD nFileSizeHigh;
+    DWORD nFileSizeLow;
+    char  cFileName[ _MAX_PATH ];
+    char  cAlternateFileName[ 14 ];
+} WIN32_FIND_DATA;
+
+HANDLE FindFirstFile(char* lpFileName,	// pointer to name of file to search for  
+    WIN32_FIND_DATA *lpFindFileData 	// pointer to returned information 
+   )
+{
+	return NULL;
+}
+
+int FindNextFile(
+    HANDLE hFindFile,				    // handle to search  
+    WIN32_FIND_DATA *lpFindFileData 	// pointer to structure for data on found file  
+   )
+{
+	return TRUE;
+} 
+int FindClose(
+    HANDLE hFindFile 					// file search handle 
+   )
+{
+	return TRUE;
+}
+
+int GetDiskFreeSpace(
+    char* lpRootPathName,			// address of root path 
+    DWORD *lpSectorsPerCluster,		// address of sectors per cluster 
+    DWORD *lpBytesPerSector,		// address of bytes per sector 
+    DWORD *lpNumberOfFreeClusters,	// address of number of free clusters  
+    DWORD *lpTotalNumberOfClusters 	// address of total number of clusters  
+   )	
+{ 
+  struct statvfs stat;
+  if (statvfs(lpRootPathName, &stat) != 0) {
+    // error happens, just quits here
+    return 0;
+  }
+  *lpTotalNumberOfClusters=stat.f_blocks;
+  *lpNumberOfFreeClusters=stat.f_bavail;
+  *lpBytesPerSector=stat.f_bsize;
+  *lpSectorsPerCluster=stat.f_frsize/stat.f_bsize;
+  return 1;
+}
+#endif
 
 HANDLE hFindFile = INVALID_HANDLE_VALUE;
 
@@ -437,7 +637,7 @@ DEBUGOUT( stderr, "REOPEN %d - ", i);
     if ( i >= MAXFCB || !mk_filename( filename, fcbaddr)) return 0xff;
 
     if ( cr == CF_CREATE) {
-	if ( access( filename, 0) == 0) return 0xff;
+	if ( access( filename, F_OK) == 0) return 0xff;
 	if (( fcbs[ i].fp = fopen( filename, "w+b")) == NULL) return 0xff;
 	fcbs[ i].mod = fcbs[ i].wr = TRUE;
     } else {
@@ -1285,16 +1485,6 @@ void help( void)
 		"	-w[0-9] .. wait on console status check (9:max)\n"
     );
     exit( 1);
-}
-
-char* CharUpperX(char* st)
-{
-  char* ss=st;
-  while (ss && *ss) {
-    *ss=toupper(*ss);
-    ss++;
-  }
-  return st;
 }
 
 int main( int argc, char *argv[])
