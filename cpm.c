@@ -301,10 +301,13 @@ char* CharUpperX(char* st)
 void _splitpath(char *path, char *drive, char *dir, char *name, char *ext)
 {
 	char* cc;
+	*dir=0; *name=0; *ext=0;
 	strncpy(name, (cc=basename(path)) ? cc: "", _MAX_FNAME);
 	strncpy(dir,  (cc=dirname(path)) ? cc: "", _MAX_DIR);
+	if ((strcmp(dir,".")==0)&&(*path!='.'))
+		*dir=0;								
 	if ((cc=strstr(name, "."))!=NULL) {
-		strncpy(ext, cc, _MAX_EXT);
+		strncpy(ext, &cc[1], _MAX_EXT);
 		*cc='\0';
 	}
 }
@@ -329,7 +332,11 @@ char *buildname(char* dirnm, char* filenm)
 void _makepath(char *path, char *drive, char *dir, char *name, char *ext)
 {
 	strncpy(path, buildname(dir,name), _MAX_DIR);
-	if (ext) strncat(path, ext, _MAX_EXT/2);
+	if (ext) {
+		if (*ext!='.')
+			strcat(path, ".");
+		strncat(path, ext, 4);		/* CPM have 3-char ext + dot */
+	}
 }
 
 /* Find file in pathes:
@@ -1738,9 +1745,9 @@ void cpm_putch( int c)
 
 void help( void)
 {
-    fprintf( stderr, "CPM" CPMEXT " -- CP/M-80 program EXEcutor for " CPMTARGET " " CPMVERSION "\n"
+    fprintf( stderr, "CPM" CPMEXT " -- CP/M-80 program EXEcutor for " CPMTARGET " V" CPMVERSION "\n"
 		"Copyright (C) 2004-2012 by K.Murakami\n"
-		"  Usage: CPM [-hxapdC][-w[0-9]] command arg1 arg2 ...\n"
+		"  Usage: CPM [-hxapdCkr][-w[0-9]] command arg1 arg2 ...\n"
 		"	-h .. return HI-TECH C exit code\n"
 		"	-x .. return ERROR if A:$$$.SUB deleted\n"
 		"	-a .. select A: (program directry)\n"
@@ -1784,7 +1791,10 @@ int main( int argc, char *argv[])
     if ( i >= argc) help();
 
     if ( !load_program( argv[ i])) {
-        fprintf( stderr, "ERROR: program not found.\n");
+        fprintf( stderr, "ERROR: program `%s`{.cpm;.com} not found.\n", argv[ 1]);
+#ifdef __linux__
+		fprintf( stderr, "Be careful of case sensitive typeing!\n");
+#endif
         return -1;
     }
 
