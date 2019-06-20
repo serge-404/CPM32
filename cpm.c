@@ -178,6 +178,7 @@ int abort_submit;
 
 FILE *punfp, *rdrfp, *lstfp;
 
+char StartDir[PATH_MAX+1];
 char filename[ 1024];
 char filename2[ 1024];
 
@@ -284,7 +285,9 @@ void setup_disk_vct( void)
 char* CharUpperX(char* st)
 {
   char* ss=st;
-  while (ss && *ss) {
+  if (st==NULL) 
+		return st;
+  while (*ss) {
     *ss=toupper(*ss);
     ss++;
   }
@@ -298,6 +301,7 @@ char* CharUpperX(char* st)
 #define _MAX_DIR        256
 #define _MAX_FNAME      256
 #define _MAX_EXT        256
+#define stricmp strucmp
 void _splitpath(char *path, char *drive, char *dir, char *name, char *ext)
 {
 	char* cc;
@@ -331,12 +335,21 @@ char *buildname(char* dirnm, char* filenm)
 
 void _makepath(char *path, char *drive, char *dir, char *name, char *ext)
 {
-	strncpy(path, buildname(dir,name), _MAX_DIR);
+  char *cc;
+  if (path) {
+	*path=0; 
+	if ((name==NULL)&&(ext==NULL))
+	   strncpy(path, dir, _MAX_DIR);
+    else {
+		cc=buildname(dir,name);
+	    if (cc) strncpy(path, cc, _MAX_DIR);
+`	}
 	if (ext) {
 		if (*ext!='.')
 			strcat(path, ".");
 		strncat(path, ext, 4);		/* CPM have 3-char ext + dot */
 	}
+  }
 }
 
 /* Find file in pathes:
@@ -349,14 +362,15 @@ void _makepath(char *path, char *drive, char *dir, char *name, char *ext)
 char* findPath(char* path, char* env)
 {
 	char *p, *envp;
-	static char name[_MAX_DIR+1];
+	static char name[_MAX_PATH+1];
 
 	if (*path == '/' ||   	/* qualified name */
 	    *path == '.')
 		return path;
 	/* search for pathes list */
-	if ((envp = getenv(env)) == NULL)
-		envp = CPMPATH;
+	if ((envp = getenv(env)) == NULL) {
+	   envp = StartDir;
+	}
 	/* lookup all pathes */
 	while (*envp) {
 		p = name; 
@@ -385,9 +399,14 @@ char* _searchenv(char *file, char *varname, char *buf)
     return strncpy(buf, (cc=findPath(file,varname)) ? cc : "", _MAX_DIR);
 }
 
-int stricmp(char* s1, char* s2)
+/* CASE insensitive string compare */
+int strucmp(char *d, char *s)	
 {
-	return strcmp(CharUpperX(s1),s2);
+	register char c1, *s1 = (char *)d, *s2 = (char *)s, c2;
+
+	while ( ( c1 = ((c1=*s1++) > 0x60 ? c1 & 0x5F : c1 )) == ( c2 = ((c2=*s2++) > 0x60 ? c2 & 0x5F : c2 )) && c1)
+		;
+	return c1 - c2;
 }
 #endif
 
@@ -395,13 +414,13 @@ int load_program( char *pfile)
 {
     FILE *fp;
 #ifdef __linux__
-    char* drv="\0";
+    char* drv="";
 #else
     char drv[ _MAX_DRIVE];
 #endif	
 	char dir[ _MAX_DIR], fname[ _MAX_FNAME], ext[ _MAX_EXT];
 
-    _splitpath( pfile, drv, dir, fname, ext);
+   _splitpath( pfile, drv, dir, fname, ext);
    if ( drv[ 0] == '\0' && dir[ 0] == '\0') {
 	 if ( ext[ 0] == '\0') {
 	    _makepath( filename2, drv, dir, fname, "cpm");
@@ -429,10 +448,14 @@ int load_program( char *pfile)
 
     fread( mem + 0x100, 1, BDOS_ORG-0x100, fp);
     fclose( fp);
-
-    if ( stricmp( ext, ".COM") == 0) cpm_version = 0x122;
+    if ( stricmp( ext, "COM") == 0)
+		cpm_version = 0x122;
+ 
     cpm_drive[ 0] = (char *)malloc( strlen( drv) + strlen( dir) + 1);
-    _makepath( cpm_drive[ 0], drv, dir, NULL, NULL);
+/*
+DIR *pDir = opendir(StartDir);
+*/	
+	_makepath( cpm_drive[ 0], drv, dir, NULL, NULL);
     cpm_drive[ 1] = "";
 
     return TRUE;
@@ -535,7 +558,7 @@ typedef struct {
 
 char ffName[_MAX_PATH];
 
-HANDLE FindFirstFile(char* lpFileName,	// pointer to name of file to search for  
+DIR* FindFirstFile(char* lpFileName,	// pointer to name of file to search for  
     WIN32_FIND_DATA *lpFindFileData 	// pointer to returned information 
    )
 {
@@ -543,22 +566,28 @@ HANDLE FindFirstFile(char* lpFileName,	// pointer to name of file to search for
     struct dirent *pDirent;
     struct stat statbuf;
 	char *cc, *path=lpFileName;
-	if (!(cc=strrchr(lpFileName, '$')))
-	    return INVALID_HANDLE_VALUE;
-	*cc='\0';    
-	strncpy(ffName, &cc[1], sizeof(ffName)-1);
-	if((pDir = opendir(path)) == NULL) 
+	if ((cc=strrchr(lpFileName, '$'))!=NULL) 
+		*cc++=0;
+	else {
+		cc=lpFileName;
+		path=StartDir;
+	}
+	strncpy(ffName, cc, sizeof(ffName)-1);
+	CharUpperX(ffName);
+	pDir = opendir(path);
+	if (pDir == NULL) 
         return INVALID_HANDLE_VALUE;
 	*cc='$';
     while ((pDirent = readdir(pDir)) != NULL) {
-		if (fnmatch(ffName, pDirent->d_name, FNM_CASEFOLD)) {
-			if (!(stat(pDirent->d_name, &statbuf))) { 
-			   closedir(pDir);
-	 		   return hFindFile=INVALID_HANDLE_VALUE;
+       	strncpy(lpFindFileData->cFileName, pDirent->d_name, _MAX_PATH-1);
+		if (fnmatch(ffName, CharUpperX(pDirent->d_name), FNM_CASEFOLD)) {
+			if (!(stat(lpFindFileData->cFileName, &statbuf))) { 
+				closedir(pDir);
+				fprintf(stderr, "ERROR: failed while stat file `%s`\n",lpFindFileData->cFileName);
+	 			return hFindFile=INVALID_HANDLE_VALUE;
 			}
 			if (!(statbuf.st_mode & S_IFDIR)) {
 				lpFindFileData->cAlternateFileName[0]=0;
-            	strncpy(lpFindFileData->cFileName, pDirent->d_name, _MAX_PATH-1);
 				lpFindFileData->dwFileAttributes=0;		/* ordinal file */	
 				lpFindFileData->nFileSizeHigh=0;
 				lpFindFileData->nFileSizeLow=(DWORD)statbuf.st_size;
@@ -1766,6 +1795,12 @@ int main( int argc, char *argv[])
     int st, i, p, q;
     char *arg1, *arg2;
     Z80reset();
+#ifdef __linux__
+    if (getcwd(StartDir, sizeof(StartDir)-1) == NULL) {
+       perror("getcwd() error");
+       return -1;
+   }
+#endif
     for ( i = 1; i < argc; i++) {
 	char *s = argv[ i];
 	if ( *s != '-') break;
@@ -1874,11 +1909,11 @@ int main( int argc, char *argv[])
    sigIntHandler.sa_flags = 0;
    sigaction(SIGINT, &sigIntHandler, NULL);
 #endif
-    memset( guard, HALT, sizeof guard);
+    memset( guard, HALT, sizeof(guard));
     /* reg.x.r */ *((byte*)&IR) = (byte)time( NULL);
     /* reg.x.sp */ SP = BDOS_ORG - 2;
     /* reg.x.pc */ PC = 0x100;
-    st=5;
+     st=5;
     while (st != EMST_STOP) {
         Z80run();
         if (StopCode) {
