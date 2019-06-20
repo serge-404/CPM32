@@ -104,3 +104,32 @@ static inline void saveCursorPosition(void) {
 static inline void restoreCursorPosition(void) {
     printf("\x1b%d", 8);
 }
+
+static inline void setTextInverted() { 
+    printf("\x1b[7m");
+}
+
+static inline void setTextNoInverted() { 
+    printf("\x1b[27m");
+}
+
+static inline void setTextNormal() { 
+    printf("\x1b[0m");
+}
+
+
+static inline void setTextBold() {
+    printf("\x1b[1m");
+}
+
+static inline void setTextNoBold() {
+    printf("\x1b[22m");
+}
+
+static inline void setTextUnderlined() {
+    printf("\x1b[4m");
+}
+
+static inline void setTextNoUnderlined() {
+    printf("\x1b[24m");
+}

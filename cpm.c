@@ -26,14 +26,14 @@
 #pragma warning(disable:4996)
 #endif
 
-#ifndef __linux__
-#include <windows.h>
-#define CH_SLASH '\\'
-#define F_OK 0
-#else
+#ifdef __linux__
 #include <ctype.h>
 #include <libgen.h>
 #define CH_SLASH '/'
+#define _GNU_SOURCE
+#define FOREGROUND_INTENSITY 0x0008 // text color is intensified.
+#define COMMON_LVB_REVERSE_VIDEO   0x4000 // DBCS: Reverse fore/back ground attribute.
+#define COMMON_LVB_UNDERSCORE      0x8000 // DBCS: Underscore.
 typedef unsigned int	UINT;
 typedef unsigned char	UCHAR;
 typedef unsigned char	BYTE;
@@ -46,7 +46,16 @@ typedef struct _COORD {
     SHORT X;
     SHORT Y;
 } COORD, *PCOORD;
+#define CPMEXT ""
+#define CPMTARGET "LINUX"
+#else
+#include <windows.h>
+#define CH_SLASH '\\'
+#define F_OK 0
+#define CPMEXT ".EXE"
+#define CPMTARGET "WIN32"
 #endif
+#define CPMVERSION "0.4"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,9 +63,14 @@ typedef struct _COORD {
 #include <time.h>
 #include <sys/stat.h>
 #ifdef __linux__
+#include <signal.h>
+#include <termios.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/statvfs.h>
+#include <sys/ioctl.h>
+#include <fnmatch.h>
+#include "ansi_escapes.h"
 #else
 #include <io.h>
 #include <conio.h>
@@ -287,9 +301,9 @@ char* CharUpperX(char* st)
 void _splitpath(char *path, char *drive, char *dir, char *name, char *ext)
 {
 	char* cc;
-	strncpy(name, cc=basename(path) ? cc: "", _MAX_FNAME);
-	strncpy(dir,  cc=dirname(path) ? cc: "", _MAX_DIR);
-	if (cc=strstr(name, ".")) {
+	strncpy(name, (cc=basename(path)) ? cc: "", _MAX_FNAME);
+	strncpy(dir,  (cc=dirname(path)) ? cc: "", _MAX_DIR);
+	if ((cc=strstr(name, "."))!=NULL) {
 		strncpy(ext, cc, _MAX_EXT);
 		*cc='\0';
 	}
@@ -361,7 +375,7 @@ char* findPath(char* path, char* env)
 char* _searchenv(char *file, char *varname, char *buf)
 {
 	char* cc;
-    return strncpy(buf, cc=findPath(file,varname) ? cc : "", _MAX_DIR);
+    return strncpy(buf, (cc=findPath(file,varname)) ? cc : "", _MAX_DIR);
 }
 
 int stricmp(char* s1, char* s2)
@@ -494,14 +508,17 @@ struct FCB {
 };
 
 #ifdef __linux__
-
 #define HANDLE DIR*
 #define INVALID_HANDLE_VALUE (void*)0
 #define FILE_ATTRIBUTE_DIRECTORY S_IFDIR
 #define FILE_ATTRIBUTE_HIDDEN 0
 #define chsize ftruncate
+#endif
 
-typedef struct _WIN32_FIND_DATAA {
+HANDLE hFindFile = INVALID_HANDLE_VALUE;
+
+#ifdef __linux__
+typedef struct {
     DWORD dwFileAttributes;
     DWORD nFileSizeHigh;
     DWORD nFileSizeLow;
@@ -509,24 +526,82 @@ typedef struct _WIN32_FIND_DATAA {
     char  cAlternateFileName[ 14 ];
 } WIN32_FIND_DATA;
 
+char ffName[_MAX_PATH];
+
 HANDLE FindFirstFile(char* lpFileName,	// pointer to name of file to search for  
     WIN32_FIND_DATA *lpFindFileData 	// pointer to returned information 
    )
 {
-	return NULL;
+    DIR *pDir;
+    struct dirent *pDirent;
+    struct stat statbuf;
+	char *cc, *path=lpFileName;
+	if (!(cc=strrchr(lpFileName, '$')))
+	    return INVALID_HANDLE_VALUE;
+	*cc='\0';    
+	strncpy(ffName, &cc[1], sizeof(ffName)-1);
+	if((pDir = opendir(path)) == NULL) 
+        return INVALID_HANDLE_VALUE;
+	*cc='$';
+    while ((pDirent = readdir(pDir)) != NULL) {
+		if (fnmatch(ffName, pDirent->d_name, FNM_CASEFOLD)) {
+			if (!(stat(pDirent->d_name, &statbuf))) { 
+			   closedir(pDir);
+	 		   return hFindFile=INVALID_HANDLE_VALUE;
+			}
+			if (!(statbuf.st_mode & S_IFDIR)) {
+				lpFindFileData->cAlternateFileName[0]=0;
+            	strncpy(lpFindFileData->cFileName, pDirent->d_name, _MAX_PATH-1);
+				lpFindFileData->dwFileAttributes=0;		/* ordinal file */	
+				lpFindFileData->nFileSizeHigh=0;
+				lpFindFileData->nFileSizeLow=(DWORD)statbuf.st_size;
+				return pDir;
+			}
+		}
+    }
+    closedir(pDir);
+    return hFindFile=INVALID_HANDLE_VALUE;
 }
 
 int FindNextFile(
-    HANDLE hFindFile,				    // handle to search  
+    HANDLE hFndFile,				    // handle to search  
     WIN32_FIND_DATA *lpFindFileData 	// pointer to structure for data on found file  
    )
 {
-	return TRUE;
+    struct dirent *pDirent;
+    struct stat statbuf;
+    while ((pDirent = readdir(hFndFile)) != NULL) {
+		if (fnmatch(ffName, pDirent->d_name, FNM_CASEFOLD)) {
+			if (!(stat(pDirent->d_name, &statbuf))) { 
+			   closedir(hFndFile);
+			   hFindFile=NULL;	
+	 		   return 0;
+			}
+			if (!(statbuf.st_mode & S_IFDIR)) {
+				lpFindFileData->cAlternateFileName[0]=0;
+            	strncpy(lpFindFileData->cFileName, pDirent->d_name, _MAX_PATH-1);
+				lpFindFileData->dwFileAttributes=0;		/* ordinal file */	
+				lpFindFileData->nFileSizeHigh=0;
+				lpFindFileData->nFileSizeLow=(DWORD)statbuf.st_size;
+				return 1;
+			}
+		}
+    }
+    closedir(hFndFile);
+    hFndFile=NULL;
+	return 0;
 } 
+
 int FindClose(
-    HANDLE hFindFile 					// file search handle 
+    HANDLE hFndFile 					// file search handle 
    )
 {
+	int res;
+	if (hFndFile) {
+		res=closedir(hFndFile)==0;
+		hFndFile=INVALID_HANDLE_VALUE;
+		return res==0;
+	}
 	return TRUE;
 }
 
@@ -550,8 +625,6 @@ int GetDiskFreeSpace(
   return 1;
 }
 #endif
-
-HANDLE hFindFile = INVALID_HANDLE_VALUE;
 
 byte cpm_findnext( void)
 {
@@ -963,24 +1036,96 @@ COORD cpm_cur;
 
 void w32_putch( byte c)
 {
+#ifdef __linux__
+	putchar(c);
+#else
     DWORD n;
-
     WriteConsole( hConOut, &c, 1, &n, NULL);
+#endif
 }
 
 void w32_gotoxy( int x, int y)
 {
+#ifdef __linux__
+	moveTo((short)y,(short)x);
+#else
     COORD cur;
     if ( x > 0) x--;
     if ( y > 0) y--;
     cur.X = (short)x; cur.Y = (short)y;
     SetConsoleCursorPosition( hConOut, cur);
+#endif	
 }
+
+#ifdef __linux__
+void getCursorPosition(int *row, int *col) {
+    printf("\x1b[6n");
+    char buff[128];
+    int indx = 0;
+    for(;;) {
+        int cc = getchar();
+        buff[indx] = (char)cc;
+        indx++;
+        if(cc == 'R') {
+            buff[indx + 1] = '\0';
+            break;
+        }
+    }    
+    sscanf(buff, "\x1b[%d;%dR", row, col);
+    fseek(stdin, 0, SEEK_END);
+}
+
+void enable_raw_mode()
+{
+    struct termios term;
+    tcgetattr(0, &term);
+    term.c_lflag &= ~(ICANON | ECHO); // Disable echo as well
+    tcsetattr(0, TCSANOW, &term);
+}
+
+void disable_raw_mode()
+{
+    struct termios term;
+    tcgetattr(0, &term);
+    term.c_lflag |= ICANON | ECHO;
+    tcsetattr(0, TCSANOW, &term);
+}
+
+int kbhit()
+{
+    int byteswaiting;
+    ioctl(0, FIONREAD, &byteswaiting);
+    return byteswaiting > 0;
+}
+
+#define getch getchar
+#endif
 
 void w32_gotodxy( int dx, int dy)
 {
+#ifdef __linux__
+	int x,y,sx=80,sy=24;
+#ifdef TIOCGSIZE
+    struct ttysize ts;
+    ioctl(STDIN_FILENO, TIOCGSIZE, &ts);
+    sx = ts.ts_cols;
+    sy = ts.ts_lines;
+#elif defined(TIOCGWINSZ)
+    struct winsize ts;
+    ioctl(STDIN_FILENO, TIOCGWINSZ, &ts);
+    sx = ts.ws_col;
+    sy = ts.ws_row;
+#endif /* TIOCGSIZE */
+	getCursorPosition(&y,&x);
+	dx+=x;
+	dy+=y;
+    if ( dx >= sx) dx = sx - 1;
+    else if ( dx < 0) dx = 0;
+    if ( dy >= sy) dy = sy - 1;
+    else if ( dy < 0) dy = 0;
+	moveTo((short)dy,(short)dx);
+#else
     CONSOLE_SCREEN_BUFFER_INFO csbi;
-
     GetConsoleScreenBufferInfo( hConOut, &csbi);
     dx += csbi.dwCursorPosition.X;
     dy += csbi.dwCursorPosition.Y;
@@ -991,22 +1136,42 @@ void w32_gotodxy( int dx, int dy)
     csbi.dwCursorPosition.X = (short)dx;
     csbi.dwCursorPosition.Y = (short)dy;
     SetConsoleCursorPosition( hConOut, csbi.dwCursorPosition);
+#endif	
 }
 
 void w32_savexy( void)
 {
+#ifdef __linux__
+	int x,y;
+	getCursorPosition(&y,&x);
+	cpm_cur.Y=(SHORT)y; cpm_cur.X=(SHORT)x;
+#else
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo( hConOut, &csbi);
     cpm_cur = csbi.dwCursorPosition;
+#endif
 }
 
 void w32_restorexy( void)
 {
-    SetConsoleCursorPosition( hConOut, cpm_cur);
+#ifdef __linux__
+	moveTo((short)cpm_cur.Y,(short)cpm_cur.X);
+#else
+	SetConsoleCursorPosition( hConOut, cpm_cur);
+#endif
 }
 
 void w32_cls( int arg)
 {
+#ifdef __linux__
+    if ( arg == 0) {							/* CUR to end of screen */
+		clearScreenToBottom();
+	} else if ( arg == 1) {					 	/* screen top to CUR */
+		clearScreenToTop();
+	} else {									/* ALL of SCREEN */
+		clearScreen();
+    }
+#else
     DWORD n, size;
     WORD attr;
     COORD cur = {0,0};
@@ -1030,11 +1195,21 @@ void w32_cls( int arg)
     FillConsoleOutputCharacter( hConOut, ' ', size, cur, &n); /* NUL->SP */
     FillConsoleOutputAttribute( hConOut, attr, size, cur, &n);
     if ( arg == 2) SetConsoleCursorPosition( hConOut, cur);
+#endif
 }
 
 void w32_clrln( int arg)
 {
-    DWORD n, size;
+#ifdef __linux__
+    if ( arg == 0) {					/* CUR to EOL */
+		clearLineToRight();
+    } else if ( arg == 1) {				/* TOL to CUR */
+		clearLineToLeft();
+	} else {							/* ALL LINE */
+		clearLine();
+	}
+#else
+	DWORD n, size;
     WORD attr;
     COORD cur;
     CONSOLE_SCREEN_BUFFER_INFO csbi;
@@ -1054,11 +1229,15 @@ void w32_clrln( int arg)
 
     FillConsoleOutputCharacter( hConOut, ' ', size, cur, &n); /* NUL->SP */
     FillConsoleOutputAttribute( hConOut, attr, size, cur, &n);
+#endif
 }
 
 void w32_scroll( int len)
 {
-    COORD dst;
+#ifdef __linux__
+								/* TODO */
+#else
+		COORD dst;
     SMALL_RECT src;
     CHAR_INFO chinfo;
     CONSOLE_SCREEN_BUFFER_INFO csbi;
@@ -1074,10 +1253,14 @@ void w32_scroll( int len)
     chinfo.Attributes = csbi.wAttributes;
 
     ScrollConsoleScreenBuffer( hConOut, &src, NULL, dst, &chinfo);
+#endif
 }
 
 void w32_up( void)
 {
+#ifdef __linux__
+	moveUp(1);
+#else
     COORD dst;
     SMALL_RECT src;
     CHAR_INFO chinfo;
@@ -1098,10 +1281,14 @@ void w32_up( void)
 	chinfo.Attributes = csbi.wAttributes;
 	ScrollConsoleScreenBuffer( hConOut, &src, NULL, dst, &chinfo);
     }
+#endif
 }
 
 void w32_down( void)
 {
+#ifdef __linux__
+	moveDown(1);
+#else
     COORD dst;
     SMALL_RECT src;
     CHAR_INFO chinfo;
@@ -1121,10 +1308,14 @@ void w32_down( void)
 	chinfo.Attributes = csbi.wAttributes;
 	ScrollConsoleScreenBuffer( hConOut, &src, NULL, dst, &chinfo);
     }
+#endif
 }
 
 void w32_left( void)
 {
+#ifdef __linux__
+	moveLeft(1);
+#else
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo( hConOut, &csbi);
     if ( ++csbi.dwCursorPosition.X < csbi.dwSize.X) {
@@ -1134,13 +1325,18 @@ void w32_left( void)
 	SetConsoleCursorPosition( hConOut, csbi.dwCursorPosition);
 	w32_down();
     }
+#endif
 }
 
 WORD w32_attr( void)
 {
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
+#ifdef __linux__
+	return 7;		/* text=white, back=black */
+#else
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo( hConOut, &csbi);
     return csbi.wAttributes;
+#endif	
 }
 
 
@@ -1149,6 +1345,13 @@ enum { ST_START, ST_NOP, ST_CHAR, ST_ESC, ST_EQ, ST_EQ2, ST_ANSI, ST_EQR};
 byte color_table[] = { 0, 4, 2, 6, 1, 5, 3, 7};
 byte color_table2[] = { 0, 4, 1, 5, 2, 6, 3, 7};
 
+#ifdef __linux__
+void my_handler(int s){
+//    printf("^C\r\n");
+}
+static struct termios orig_term;
+static struct termios new_term;
+#else
 BOOL _stdcall console_event_hander( DWORD type)
 {
 //    DWORD n;
@@ -1158,10 +1361,20 @@ BOOL _stdcall console_event_hander( DWORD type)
 //    WriteConsole( hConOut, "^C\r\n", 4, &n, NULL);
     return TRUE;
 }
+#endif
 
 void cpm_conio_setup( void)
 {
-    DWORD md;
+#ifdef __linux__
+    tcgetattr(STDIN_FILENO, &orig_term);
+    new_term = orig_term;
+    new_term.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &new_term);
+	enable_raw_mode();
+	conout = TRUE;									/* TODO */
+	conin = TRUE;
+#else		
+	DWORD md;
     HANDLE hnd = GetStdHandle( STD_OUTPUT_HANDLE);
 
     if ( hnd != INVALID_HANDLE_VALUE &&
@@ -1177,11 +1390,24 @@ void cpm_conio_setup( void)
     }
 
      SetConsoleCtrlHandler( console_event_hander, TRUE);
+#endif
 }
+
+void cpm_conio_restore( void)
+{
+#ifdef __linux__
+	disable_raw_mode();
+	printf("\x1b[0m");                               // Reset colors
+    tcsetattr(STDIN_FILENO, TCSANOW, &orig_term);    // Reset console mode
+#endif
+}
+
 
 byte cpm_const( void)
 {
-    DWORD t;
+#ifdef __linux__
+#else
+		DWORD t;
     static DWORD t0, ct;
 
     if ( conin  ? kbhit() 
@@ -1195,6 +1421,7 @@ byte cpm_const( void)
 	else --ct;
 	t0 = t;
     }
+#endif
     return 0;
 }
 
@@ -1289,10 +1516,14 @@ byte cpm_getch( void)
 byte cpm_getche( void)
 {
     int c;
-    DWORD n;
 
     c = cpm_getch();
     if ( conin) {
+#ifdef __linux__
+	putchar(c);  
+#else
+    DWORD n;
+
 	if ( c == '\x03') {
 		GenerateConsoleCtrlEvent( CTRL_C_EVENT, 0);
 	}
@@ -1301,8 +1532,9 @@ byte cpm_getche( void)
 	    			  0, NULL, OPEN_EXISTING, 0, NULL);
 	}
 	WriteConsole( hConOut, &c, 1, &n, NULL);
+#endif
     }
-    return (byte)c;
+	return (byte)c;
 }
 
 byte cpm_gets( byte *buf)
@@ -1324,8 +1556,9 @@ void cpm_putch( int c)
 {
     static byte esc_stat, arg_n;
     static byte args[ 8];
+#ifndef __linux__
     word cc;
-
+#endif
     switch ( esc_stat) {
     case ST_NOP:if ( c != '\r') putchar((char)c);
                 return;
@@ -1354,7 +1587,7 @@ void cpm_putch( int c)
 	w32_gotoxy( args[ 1], args[ 0]);
 	break;
     case ST_ESC:
-      if (c>127) {                                        /* ROBOTRON-1757 GotoXY */
+      if (c>127) {                                        /* ROBOTRON-1715 GotoXY */
          R1715=TRUE;
 	 args[ 0] = (byte)(c - 0x80 + 1);
          esc_stat = ST_EQR;
@@ -1364,21 +1597,41 @@ void cpm_putch( int c)
 	switch ( c) {
         case '6': if (inversed) break;                      /* 2019/ VT52 of ORION-128: INVERSE ON */
                   inversed=TRUE;
+#ifdef __linux__
+				  setTextInverted();
+#else
                   if (cc=w32_attr())                        /* swap bgIRGB with fgIRGB because COMMON_LVB_REVERSE_VIDEO bit not working */
                       SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc | COMMON_LVB_REVERSE_VIDEO */
+#endif
                   break;
         case '7': if (!inversed) break;                     /* 2019/ VT52 of ORION-128: INVERSE OFF */
                   inversed=FALSE;
+#ifdef __linux__
+				  setTextNoInverted();							
+#else
                   if (cc=w32_attr())
                       SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc & ~COMMON_LVB_REVERSE_VIDEO */
+#endif
                   break;
 //        case 'E':                                      /* 2019/ VT52 of ORION-128:  CLS (аналог 0C) */
 	case '*': w32_cls( 2); break;
         case 'H': w32_gotoxy(1,1); break;                /* 2019/ VT52 of ORION-128:  HOME (без очистки экрана) */
 	case 'Y':                                        /* 2019 - VT52 gotoxy */
 	case '=': esc_stat = ST_EQ; return;
-	case '(': SetConsoleTextAttribute( hConOut, w32_attr() | 8); break;
-	case ')': SetConsoleTextAttribute( hConOut, w32_attr() & ~8); break;
+	case '(': 
+#ifdef __linux__
+			  setTextBold();							
+#else
+			SetConsoleTextAttribute( hConOut, w32_attr() | 8); 
+			break;
+#endif
+	case ')': 
+#ifdef __linux__
+			  setTextNoBold();							
+#else
+			SetConsoleTextAttribute( hConOut, w32_attr() & ~8); 
+#endif
+			break;
 	case 't':
         case 'K':                                        /* 2019/ VT52 of ORION-128: CLREOL - стирание до конца строки (вкл-я позицию курсора) */
 	case 'T': w32_clrln( 0); break;
@@ -1439,7 +1692,7 @@ void cpm_putch( int c)
 	    w32_savexy();
 	} else if ( c == 'm') {
 	    int i;
-	    word f = 7, b = 0, a = 0, t;
+	    word f = 7, b = 0, a = 0;
 	    for ( i = 0; i <= arg_n; i++) {
 		c = args[ i];
 		if ( c >= 30 && c <= 37) {
@@ -1456,11 +1709,23 @@ void cpm_putch( int c)
 		    a |= COMMON_LVB_UNDERSCORE;
 		}
 	    }
-	    /* bugbug! not work REVERSE_VIDEO at 2K,XP console */
+#ifdef __linux__
+	    if ( a & FOREGROUND_INTENSITY) setTextBold();
+		  else setTextNoBold();
+	    if ( a & COMMON_LVB_REVERSE_VIDEO) setTextInverted();
+		  else setTextNoInverted();
+	    if ( a & COMMON_LVB_UNDERSCORE) setTextUnderlined();
+		  else setTextNoUnderlined();
+		setTextColor(f);
+		setBackgroundColor(b);
+#else
+		word t;
 	    f |= a & FOREGROUND_INTENSITY;
+	    /* bugbug! REVERSE_VIDEO not work at 2K,XP console */
 	    if ( a & COMMON_LVB_REVERSE_VIDEO) { t = f; f = b; b = t;}
-	    a &= COMMON_LVB_UNDERSCORE;
+	    a &= COMMON_LVB_UNDERSCORE;									/* WTF? */
 	    SetConsoleTextAttribute( hConOut, f | (b << 4) | a);
+#endif
 	} else {
 	    if (debug_flag) printf( "ESC[n%c", c);
 	}
@@ -1473,7 +1738,7 @@ void cpm_putch( int c)
 
 void help( void)
 {
-    fprintf( stderr, "CPM.EXE -- CP/M-80 program EXEcutor for Win32 V0.4\n"
+    fprintf( stderr, "CPM" CPMEXT " -- CP/M-80 program EXEcutor for " CPMTARGET " " CPMVERSION "\n"
 		"Copyright (C) 2004-2012 by K.Murakami\n"
 		"  Usage: CPM [-hxapdC][-w[0-9]] command arg1 arg2 ...\n"
 		"	-h .. return HI-TECH C exit code\n"
@@ -1483,6 +1748,7 @@ void help( void)
 		"	-d .. disable auto drive assign\n"
 		"	-C .. args to uppercase\n"
 		"	-k .. do not KOI8 conversion\n"
+		"	-r .. do Robotron-1715 escapes\n"
 		"	-w[0-9] .. wait on console status check (9:max)\n"
     );
     exit( 1);
@@ -1509,7 +1775,8 @@ int main( int argc, char *argv[])
 	    case 'x': retcode_flag = RC_BDSC; break;
 	    case 'd': no_auto_assign = TRUE; break;
 	    case 'C': uppercase_flag = TRUE; break;
-            case 'k': NoKOI=TRUE; break;
+	    case 'k': NoKOI=TRUE; break;
+	    case 'r': R1715=TRUE; break;
 	    default: help();
 	    }
 	}
@@ -1590,7 +1857,13 @@ int main( int argc, char *argv[])
 
     /* emulation start */
     cpm_conio_setup();
-
+#ifdef __linux__
+   struct sigaction sigIntHandler;
+   sigIntHandler.sa_handler = my_handler;
+   sigemptyset(&sigIntHandler.sa_mask);
+   sigIntHandler.sa_flags = 0;
+   sigaction(SIGINT, &sigIntHandler, NULL);
+#endif
     memset( guard, HALT, sizeof guard);
     /* reg.x.r */ *((byte*)&IR) = (byte)time( NULL);
     /* reg.x.sp */ SP = BDOS_ORG - 2;
@@ -1612,7 +1885,7 @@ int main( int argc, char *argv[])
 	  if ( (word)PC == BDOS_ORG+2) {				/* -- BDOS CALL -- */
 	    /* reg.x.hl */ HL = 0;
 	    switch ( /* reg.b.c */ (byte)BC ) {
-	    case  0: return 0;				/* boot */
+	    case  0: goto cpm_exit; /* return 0; */				/* boot */
 	    case  1:					/* con in */
 		/* reg.b.l */ *((byte*)&HL) = cpm_getche();
 		break;
@@ -1790,8 +2063,10 @@ DEBUGOUT( stderr, " with 0 -> %02x\n", /* reg.b.l */ (byte)HL);
 	    switch ( q=((word)PrevPC-(word)p) ) {
 	    case  0: 					  /* cold boot */       /* 0 */
 	    case  3:					  /* warm boot */       /* 1 */
-		if ( pause_flag) while ( cpm_getch() >= ' ');
-		return  retcode_flag == RC_HITECH ? *(word *)(mem + 0x80) :
+cpm_exit:
+		  if ( pause_flag) while ( cpm_getch() >= ' ');
+		  cpm_conio_restore();	
+		  return  retcode_flag == RC_HITECH ? *(word *)(mem + 0x80) :
 			retcode_flag == RC_BDSC && abort_submit ? 2 : 0;
 	    case  6:		/* const */                                     /* 2 */
                 /* reg.b.a */ ((byte*)&AF)[1] = cpm_const();
