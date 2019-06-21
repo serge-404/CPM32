@@ -120,12 +120,12 @@ enum { RC_HITECH = 1, RC_BDSC};
 
 /* ============ I/O callback ============ */
 int io_input( int add) {
-    fprintf( stderr, "ERROR: i/o read port:%04x\n", add);
+    DEBUGOUT( stderr, "ERROR: i/o read port:%04x\n", add);
     exit( -1);
     return 0;
 }
 void io_output( int add, int data) {
-    fprintf( stderr, "ERROR: i/o write port:%04x <- %02x\n", add, data);
+    DEBUGOUT( stderr, "ERROR: i/o write port:%04x <- %02x\n", add, data);
     exit( -1);
 }
 
@@ -343,7 +343,7 @@ void _makepath(char *path, char *drive, char *dir, char *name, char *ext)
     else {
 		cc=buildname(dir,name);
 	    if (cc) strncpy(path, cc, _MAX_DIR);
-`	}
+	}
 	if (ext) {
 		if (*ext!='.')
 			strcat(path, ".");
@@ -354,10 +354,10 @@ void _makepath(char *path, char *drive, char *dir, char *name, char *ext)
 
 /* Find file in pathes:
  * 1. /name or ./name or ../name is already qualified names
- * 2. else search in all pathes described in env var PATH (if this
- *    var is not exist, _PATH_DEFPATH is used)
+ * 2. else search in all pathes described in env var CPMPATH
+ *    (if this var is not exist, StartDir is used)
  * 3. else search in current directory
- * 4. else return NULL (execve() interpretes NULL as non existent file!)
+ * 4. else return NULL 
  */
 char* findPath(char* path, char* env)
 {
@@ -450,13 +450,13 @@ int load_program( char *pfile)
     fclose( fp);
     if ( stricmp( ext, "COM") == 0)
 		cpm_version = 0x122;
- 
     cpm_drive[ 0] = (char *)malloc( strlen( drv) + strlen( dir) + 1);
-/*
-DIR *pDir = opendir(StartDir);
-*/	
+#ifdef __linux__
+	strcpy( cpm_drive[ 0], dir);
+#else
 	_makepath( cpm_drive[ 0], drv, dir, NULL, NULL);
-    cpm_drive[ 1] = "";
+#endif
+//    cpm_drive[ 1] = "";
 
     return TRUE;
 }
@@ -538,7 +538,7 @@ struct FCB {
 };
 
 #ifdef __linux__
-#define HANDLE DIR*
+#define HANDLE void*
 #define INVALID_HANDLE_VALUE (void*)0
 #define FILE_ATTRIBUTE_DIRECTORY S_IFDIR
 #define FILE_ATTRIBUTE_HIDDEN 0
@@ -557,33 +557,40 @@ typedef struct {
 } WIN32_FIND_DATA;
 
 char ffName[_MAX_PATH];
+char ffDir[_MAX_PATH];
 
-DIR* FindFirstFile(char* lpFileName,	// pointer to name of file to search for  
-    WIN32_FIND_DATA *lpFindFileData 	// pointer to returned information 
-   )
+DIR *FindFirstFile(char* lpFileName,	// pointer to name of file to search for  
+    WIN32_FIND_DATA *lpFindFileData) 	// pointer to returned information 
 {
     DIR *pDir;
     struct dirent *pDirent;
     struct stat statbuf;
-	char *cc, *path=lpFileName;
-	if ((cc=strrchr(lpFileName, '$'))!=NULL) 
-		*cc++=0;
-	else {
-		cc=lpFileName;
-		path=StartDir;
+	char *cDir, *cName=lpFileName;
+	int szDir;
+	cDir=strrchr(lpFileName, '$');
+	if (cDir==NULL)
+		cDir=strrchr(lpFileName, '/');
+	if ((cDir)!=NULL) { 
+		cName=cDir+1;
+		cDir=lpFileName;
+		szDir=cName-cDir-1;
+		strncpy(ffDir, cDir, szDir);
+		ffDir[szDir]=0;
 	}
-	strncpy(ffName, cc, sizeof(ffName)-1);
+	else {
+		strncpy(ffDir, cpm_drive[ cpm_disk_no], sizeof(ffDir));
+	}
+	strncpy(ffName, cName, sizeof(ffName)-1);
 	CharUpperX(ffName);
-	pDir = opendir(path);
+	pDir = opendir(ffDir);
 	if (pDir == NULL) 
         return INVALID_HANDLE_VALUE;
-	*cc='$';
     while ((pDirent = readdir(pDir)) != NULL) {
        	strncpy(lpFindFileData->cFileName, pDirent->d_name, _MAX_PATH-1);
-		if (fnmatch(ffName, CharUpperX(pDirent->d_name), FNM_CASEFOLD)) {
-			if (!(stat(lpFindFileData->cFileName, &statbuf))) { 
+		if (fnmatch(ffName, CharUpperX(pDirent->d_name), FNM_CASEFOLD)==0) {
+			if (stat(buildname(ffDir,lpFindFileData->cFileName), &statbuf)!=0) { 
 				closedir(pDir);
-				fprintf(stderr, "ERROR: failed while stat file `%s`\n",lpFindFileData->cFileName);
+				DEBUGOUT(stderr, "FindFirst ERROR: failed while stat file `%s`\n",lpFindFileData->cFileName);
 	 			return hFindFile=INVALID_HANDLE_VALUE;
 			}
 			if (!(statbuf.st_mode & S_IFDIR)) {
@@ -600,22 +607,24 @@ DIR* FindFirstFile(char* lpFileName,	// pointer to name of file to search for
 }
 
 int FindNextFile(
-    HANDLE hFndFile,				    // handle to search  
-    WIN32_FIND_DATA *lpFindFileData 	// pointer to structure for data on found file  
-   )
+    DIR *hFndFile,				    	// handle to search  
+    WIN32_FIND_DATA *lpFindFileData) 	// pointer to structure for data on found file  
 {
     struct dirent *pDirent;
     struct stat statbuf;
+	if (hFndFile==INVALID_HANDLE_VALUE)
+		return 0;
     while ((pDirent = readdir(hFndFile)) != NULL) {
-		if (fnmatch(ffName, pDirent->d_name, FNM_CASEFOLD)) {
-			if (!(stat(pDirent->d_name, &statbuf))) { 
-			   closedir(hFndFile);
-			   hFindFile=NULL;	
+       	strncpy(lpFindFileData->cFileName, pDirent->d_name, _MAX_PATH-1);
+		if (fnmatch(ffName, CharUpperX(pDirent->d_name), FNM_CASEFOLD)==0) {
+			if (stat(buildname(ffDir,lpFindFileData->cFileName), &statbuf)!=0) { 
+				DEBUGOUT(stderr, "FindNext ERROR: failed while stat file `%s`\n",lpFindFileData->cFileName);
+			   if (hFndFile!=INVALID_HANDLE_VALUE) closedir(hFndFile);
+			   hFindFile=INVALID_HANDLE_VALUE;	
 	 		   return 0;
 			}
 			if (!(statbuf.st_mode & S_IFDIR)) {
 				lpFindFileData->cAlternateFileName[0]=0;
-            	strncpy(lpFindFileData->cFileName, pDirent->d_name, _MAX_PATH-1);
 				lpFindFileData->dwFileAttributes=0;		/* ordinal file */	
 				lpFindFileData->nFileSizeHigh=0;
 				lpFindFileData->nFileSizeLow=(DWORD)statbuf.st_size;
@@ -623,18 +632,18 @@ int FindNextFile(
 			}
 		}
     }
-    closedir(hFndFile);
-    hFndFile=NULL;
+    if (hFndFile!=INVALID_HANDLE_VALUE) closedir(hFndFile);
+    hFindFile=INVALID_HANDLE_VALUE;
 	return 0;
 } 
 
 int FindClose(
-    HANDLE hFndFile 					// file search handle 
+    DIR *hFndFile 					// file search handle 
    )
 {
 	int res;
 	if (hFndFile) {
-		res=closedir(hFndFile)==0;
+		res=closedir(hFndFile);
 		hFndFile=INVALID_HANDLE_VALUE;
 		return res==0;
 	}
@@ -732,7 +741,11 @@ byte cpm_file_open( byte *fcbaddr, int cr)
     int i;
     int d = 0;
     struct FCB *fcb = (struct FCB *)fcbaddr;
-
+#ifdef __linux__
+	DIR *hFndFile;	
+	WIN32_FIND_DATA aFindData;
+	char dir[ _MAX_DIR], fname[ _MAX_FNAME], ext[ _MAX_EXT];
+#endif
     if (( i = fcb->d[ 0]) > 0 && --i < MAXFCB && 
       fcbs[ i].addr == fcbaddr && fcbs[ i].fp) {
 DEBUGOUT( stderr, "REOPEN %d - ", i);
@@ -752,7 +765,19 @@ DEBUGOUT( stderr, "REOPEN %d - ", i);
 	fcbs[ i].mod = fcbs[ i].wr = TRUE;
     } else {
 	if (( fcbs[ i].fp = fopen( filename, cr ? "r+b" : "rb")) == NULL)
+	{
+#ifdef __linux__
+		if ((hFndFile=FindFirstFile( filename, &aFindData))==INVALID_HANDLE_VALUE) 
+			return 0xff;
+		_splitpath( filename, NULL, dir, fname, ext);
+		fcbs[ i].fp = fopen( buildname(dir, aFindData.cFileName), cr ? "r+b" : "rb");
+		FindClose( hFndFile);
+		if (fcbs[ i].fp == NULL)
+			return 0xff;
+#else
 		return 0xff;
+#endif
+	}
 	fcbs[ i].mod = fcbs[ i].wr = FALSE;
 	fseek( fcbs[ i].fp, 0, SEEK_END);
 	d = ftell( fcbs[ i].fp);
@@ -1062,9 +1087,10 @@ void cpm_pun_out( byte c)	/* PUN: out */
 }
 
 /* ================== CP/M consol emulation ================== */
-
+#ifndef __linux__
 HANDLE hConOut = INVALID_HANDLE_VALUE;
 HANDLE hStdIn = INVALID_HANDLE_VALUE;
+#endif
 int conout;	/* 標準出力はコンソール？ */
 int conin;	/* 標準入力はコンソール？ */
 int eofcount = 16;
@@ -1130,6 +1156,7 @@ void disable_raw_mode()
 int kbhit()
 {
     int byteswaiting;
+DEBUGOUT(stderr, "kbhit \n");
     ioctl(0, FIONREAD, &byteswaiting);
     return byteswaiting > 0;
 }
@@ -1442,6 +1469,9 @@ void cpm_conio_restore( void)
 byte cpm_const( void)
 {
 #ifdef __linux__
+	if (kbhit())
+	  return 0xff;
+	  else return 0;
 #else
 		DWORD t;
     static DWORD t0, ct;
@@ -1524,7 +1554,7 @@ static int getch( void)
 byte cpm_getch( void)
 {
     int c;
-
+DEBUGOUT(stderr, "Cpm_getch");
     if ( conin) {
 	if (( c = getch()) == 0) {
 	    switch ( getch()) {
@@ -1577,10 +1607,19 @@ byte cpm_gets( byte *buf)
 {
     int i;
 
-    if ( fgets((char *)buf + 2, buf[ 0], stdin) == NULL) {
+#ifdef __linux__
+	disable_raw_mode();
+#endif
+	if ( fgets((char *)buf + 2, buf[ 0], stdin) == NULL) {
+#ifdef __linux__
+	enable_raw_mode();
+#endif
 	if ( --eofcount == 0) exit( 0);
 	strcpy((char *)buf + 2, "\x1a\n");
     }
+#ifdef __linux__
+	enable_raw_mode();
+#endif
     i = strlen((char *)buf + 2);
     if (i > 0) i--;
     buf[ 2 + i] = '\r'; buf[ 1] = (byte)i;
@@ -1800,6 +1839,7 @@ int main( int argc, char *argv[])
        perror("getcwd() error");
        return -1;
    }
+	cpm_drive[ cpm_disk_no] = StartDir;
 #endif
     for ( i = 1; i < argc; i++) {
 	char *s = argv[ i];
@@ -1832,8 +1872,7 @@ int main( int argc, char *argv[])
 #endif
         return -1;
     }
-
-    /* setup 0 page */
+	/* setup 0 page */
     p = 0;
     mem[ p++] = 0xC3; setword( mem[ p++], BIOS_ORG + 3);	/* JP WBOOT */
     mem[ p++] = 149;                                            /* IOBYTE: 149 - console CRT(TV); 148 - console TTY(RS232) */
@@ -2114,7 +2153,7 @@ cpm_exit:
 		  return  retcode_flag == RC_HITECH ? *(word *)(mem + 0x80) :
 			retcode_flag == RC_BDSC && abort_submit ? 2 : 0;
 	    case  6:		/* const */                                     /* 2 */
-                /* reg.b.a */ ((byte*)&AF)[1] = cpm_const();
+         /* reg.b.a */ ((byte*)&AF)[1] = cpm_const();
                 break;
 	    case  9:		/* conin */                                     /* 3 */
 		/* reg.b.a */ ((byte*)&AF)[1] = cpm_getch();
