@@ -48,6 +48,7 @@ typedef struct _COORD {
 } COORD, *PCOORD;
 #define CPMEXT ""
 #define CPMTARGET "LINUX"
+#define CON_BUF_EMPTY -1
 #else
 #include <windows.h>
 #define CH_SLASH '\\'
@@ -71,6 +72,7 @@ typedef struct _COORD {
 #include <sys/ioctl.h>
 #include <fnmatch.h>
 #include "ansi_escapes.h"
+#include "conio.h"
 #else
 #include <io.h>
 #include <conio.h>
@@ -1100,6 +1102,7 @@ void w32_putch( byte c)
 {
 #ifdef __linux__
 	putchar(c);
+	fflush(stdout); 
 #else
     DWORD n;
     WriteConsole( hConOut, &c, 1, &n, NULL);
@@ -1110,6 +1113,7 @@ void w32_gotoxy( int x, int y)
 {
 #ifdef __linux__
 	moveTo((short)y,(short)x);
+	fflush(stdout);
 #else
     COORD cur;
     if ( x > 0) x--;
@@ -1120,7 +1124,21 @@ void w32_gotoxy( int x, int y)
 }
 
 #ifdef __linux__
+#define cpush(x) {xgch=x;xgch2=CON_BUF_EMPTY;}
+#define cpush2(x) {xgch2=x;}
+int xgch=CON_BUF_EMPTY;
+int xgch2=CON_BUF_EMPTY;
+
+int cpull()
+{
+	int res=xgch;
+    xgch=xgch2;
+    xgch2=CON_BUF_EMPTY;	
+	return res;
+}
+
 void getCursorPosition(int *row, int *col) {
+	fflush(0);
     printf("\x1b[6n");
     char buff[128];
     int indx = 0;
@@ -1137,6 +1155,9 @@ void getCursorPosition(int *row, int *col) {
     fseek(stdin, 0, SEEK_END);
 }
 
+#define enable_raw_mode  set_conio_terminal_mode
+#define disable_raw_mode reset_terminal_mode
+/*
 void enable_raw_mode()
 {
     struct termios term;
@@ -1156,12 +1177,10 @@ void disable_raw_mode()
 int kbhit()
 {
     int byteswaiting;
-DEBUGOUT(stderr, "kbhit \n");
     ioctl(0, FIONREAD, &byteswaiting);
     return byteswaiting > 0;
 }
-
-#define getch getchar
+*/
 #endif
 
 void w32_gotodxy( int dx, int dy)
@@ -1187,6 +1206,7 @@ void w32_gotodxy( int dx, int dy)
     if ( dy >= sy) dy = sy - 1;
     else if ( dy < 0) dy = 0;
 	moveTo((short)dy,(short)dx);
+	fflush(stdout);
 #else
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo( hConOut, &csbi);
@@ -1219,6 +1239,7 @@ void w32_restorexy( void)
 {
 #ifdef __linux__
 	moveTo((short)cpm_cur.Y,(short)cpm_cur.X);
+	fflush(stdout);
 #else
 	SetConsoleCursorPosition( hConOut, cpm_cur);
 #endif
@@ -1234,6 +1255,7 @@ void w32_cls( int arg)
 	} else {									/* ALL of SCREEN */
 		clearScreen();
     }
+	fflush(stdout); 
 #else
     DWORD n, size;
     WORD attr;
@@ -1271,6 +1293,7 @@ void w32_clrln( int arg)
 	} else {							/* ALL LINE */
 		clearLine();
 	}
+	fflush(stdout); 
 #else
 	DWORD n, size;
     WORD attr;
@@ -1322,7 +1345,7 @@ void w32_scroll( int len)
 void w32_up( void)
 {
 #ifdef __linux__
-	moveUp(1);
+	moveUp(1); 	fflush(stdout); 
 #else
     COORD dst;
     SMALL_RECT src;
@@ -1350,7 +1373,7 @@ void w32_up( void)
 void w32_down( void)
 {
 #ifdef __linux__
-	moveDown(1);
+	moveDown(1); 	fflush(stdout); 
 #else
     COORD dst;
     SMALL_RECT src;
@@ -1377,7 +1400,7 @@ void w32_down( void)
 void w32_left( void)
 {
 #ifdef __linux__
-	moveLeft(1);
+	moveLeft(1); 	fflush(stdout); 
 #else
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo( hConOut, &csbi);
@@ -1408,7 +1431,54 @@ enum { ST_START, ST_NOP, ST_CHAR, ST_ESC, ST_EQ, ST_EQ2, ST_ANSI, ST_EQR};
 byte color_table[] = { 0, 4, 2, 6, 1, 5, 3, 7};
 byte color_table2[] = { 0, 4, 1, 5, 2, 6, 3, 7};
 
+byte cpm_const( void)
+{
 #ifdef __linux__
+/*	int flags;
+	if (xgch==CON_BUF_EMPTY) 
+	{
+        flags = fcntl(STDIN_FILENO, F_GETFL);
+        fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+		xgch = getchar();
+		fcntl(STDIN_FILENO, F_SETFL, flags);
+		if (xgch == CON_BUF_EMPTY)
+	        return 0;
+	}
+  	return 0xff; */
+	if (kbhit()) 
+		return 0xff;
+	else
+		return 0;
+#else
+		DWORD t;
+    static DWORD t0, ct;
+
+    if ( conin  ? kbhit() 
+		: WaitForSingleObject( hStdIn, 0) != WAIT_TIMEOUT) {
+	return 0xff;
+    }
+    if ( kbwait) {
+	t = GetTickCount();
+	if ( t != t0) ct = (( t - t0) * 4) >> kbwait;
+	if ( ct == 0) Sleep( 1 << (kbwait - 1));
+	else --ct;
+	t0 = t;
+    }
+    return 0;
+#endif
+}
+
+#ifdef __linux__
+/* byte getch( void)
+{
+	byte res;
+    while (!cpm_const()) {};
+	res=(byte)xgch;
+	xgch=CON_BUF_EMPTY;
+	return res;
+}
+*/
+
 void my_handler(int s){
 //    printf("^C\r\n");
 }
@@ -1463,32 +1533,6 @@ void cpm_conio_restore( void)
 	printf("\x1b[0m");                               // Reset colors
     tcsetattr(STDIN_FILENO, TCSANOW, &orig_term);    // Reset console mode
 #endif
-}
-
-
-byte cpm_const( void)
-{
-#ifdef __linux__
-	if (kbhit())
-	  return 0xff;
-	  else return 0;
-#else
-		DWORD t;
-    static DWORD t0, ct;
-
-    if ( conin  ? kbhit() 
-		: WaitForSingleObject( hStdIn, 0) != WAIT_TIMEOUT) {
-	return 0xff;
-    }
-    if ( kbwait) {
-	t = GetTickCount();
-	if ( t != t0) ct = (( t - t0) * 4) >> kbwait;
-	if ( ct == 0) Sleep( 1 << (kbwait - 1));
-	else --ct;
-	t0 = t;
-    }
-#endif
-    return 0;
 }
 
 /* 2012.03 replace VC++'s broken getch */
@@ -1551,12 +1595,98 @@ static int getch( void)
 }
 #endif
 
+/*
+^[[5~ PgUp
+^[[6~ PgDn
+^[[7~ Home
+^[[8~ End
+^[Od  Ctrl-Ltarw
+^[Oc  Ctrl-Rtarw
+*/
 byte cpm_getch( void)
 {
-    int c;
-DEBUGOUT(stderr, "Cpm_getch");
+    int c, ch, ch2;
     if ( conin) {
-	if (( c = getch()) == 0) {
+#ifdef __linux__
+	  if (( c=cpull()) == CON_BUF_EMPTY)		
+	    if (( c = getch()) == 27) {		/* ESC */
+		  if (kbhit()) {
+			if ((ch=getch()) == '[') {
+				    ch2=getch();
+					switch ( ch2) {
+                		case 'A':  /* Up arrow */
+                        	return 'E' - '@';
+                		case 'B':  /* Down arrow */
+                        	return 'X' - '@';
+                		case 'C':  /* Right arrow */
+                        	return 'D' - '@';
+                		case 'D':  /* Left arrow */
+                        	return 8 /*'S' - '@'*/;
+                		case '3':  /* Delete key */
+                        	getch();
+                        	return 'G' - '@';
+                		case '2':  /* Insert key */
+                        	getch();
+                        	return 'V' - '@';
+                		case '5':  /* PgUp */
+                        	getch();
+                        	return 'R' - '@';
+                		case '6':  /* PgDn */
+                        	getch();
+                        	return 'C' - '@';
+                		/*case '1':*/			/* CTRL+func.key : `Esc[1;5`+key */
+						case '7':   /* Home */
+                        	getch();
+                		case 'H':   /* Home */
+                        	cpush('s');
+                       		return 'Q' - '@';	/* WORDSTAR Ctrl+Q+key */
+                		case '4':
+						case '8':   /* End */
+                        	getch();
+                		case 'F':   /* End */
+                        	cpush('d');
+                        	return 'Q' - '@';
+                		default:
+                        	cpush('[');
+                        	cpush2(ch2);
+                        	return 27;
+                	}
+			}
+			else if (ch=='O') {
+				ch2 = getch();
+				switch ( ch2) {
+                	case 'A':  /* Up arrow */
+                        return 'E' - '@';
+                	case 'B':  /* Down arrow */
+                        return 'X' - '@';
+                	case 'C':  /* Right arrow */
+                        return 'D' - '@';
+                	case 'D':  /* Left arrow */
+                        return 'S' - '@';
+                	case 'd':  /* Ctrl left arrow (rxvt) */
+                        return 'A' - '@';
+                	case 'c':  /* Ctrl right arrow (rxvt) */
+                        return 'F' - '@';
+                	case 'H':  /* Home */
+                        cpush('s');
+                        return 'Q' - '@';
+                	case 'F':  /* End */
+                        cpush('d');
+                        return 'Q' - '@';
+                	default:
+                        cpush('O');
+                        cpush2(ch2);
+                        return 27;
+                }
+			}
+			else {
+				cpush(ch);
+				return 27;
+			}
+		  }
+        }
+#else
+	  if (( c = getch()) == 0) {
 	    switch ( getch()) {
 	    case 72: c = 'E' - 0x40; break; /* UP */
 	    case 80: c = 'X' - 0x40; break; /* DOWN */
@@ -1571,10 +1701,11 @@ DEBUGOUT(stderr, "Cpm_getch");
 	    case 115: c = 'A' - 0x40; break; /* ^LEFT */
 	    case 116: c = 'F' - 0x40; break; /* ^RIGHT */
 	    }
-	}
+	  }
+#endif
     } else if (( c = getchar()) == EOF) {
-	if ( --eofcount == 0) exit( 0);
-	c = '\x1a';
+	  if ( --eofcount == 0) exit( 0);
+	  c = '\x1a';
     }
     return (byte)c;
 }
@@ -1586,7 +1717,7 @@ byte cpm_getche( void)
     c = cpm_getch();
     if ( conin) {
 #ifdef __linux__
-	putchar(c);  
+	w32_putch(c);  
 #else
     DWORD n;
 
@@ -1635,12 +1766,12 @@ void cpm_putch( int c)
     word cc;
 #endif
     switch ( esc_stat) {
-    case ST_NOP:if ( c != '\r') putchar((char)c);
+    case ST_NOP:if ( c != '\r') w32_putch((char)c);
                 return;
     case ST_START:
 	if ( !conout) {
 	    esc_stat = ST_NOP;
-	    putchar(( byte)c);
+	    w32_putch(( byte)c);
 	    return;
 	}
 	esc_stat = ST_CHAR;
