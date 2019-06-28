@@ -71,7 +71,7 @@ typedef struct _COORD {
 #include <sys/statvfs.h>
 #include <sys/ioctl.h>
 #include <fnmatch.h>
-#include "ansi_escapes.h"
+#include "ansiesc.h"
 #include "conio.h"
 #else
 #include <io.h>
@@ -412,6 +412,9 @@ int strucmp(char *d, char *s)
 }
 #endif
 
+char scpm[5]="cpm";
+char scom[5]="com";
+
 int load_program( char *pfile)
 {
     FILE *fp;
@@ -423,12 +426,17 @@ int load_program( char *pfile)
 	char dir[ _MAX_DIR], fname[ _MAX_FNAME], ext[ _MAX_EXT];
 
    _splitpath( pfile, drv, dir, fname, ext);
+   if ((access(pfile, F_OK) != 0) && uppercase_flag) {
+		CharUpperX(pfile);
+		CharUpperX(scpm);
+		CharUpperX(scom);
+   }
    if ( drv[ 0] == '\0' && dir[ 0] == '\0') {
 	 if ( ext[ 0] == '\0') {
-	    _makepath( filename2, drv, dir, fname, "cpm");
+	    _makepath( filename2, drv, dir, fname, scpm);
 	    _searchenv( filename2, CPMPATH, filename);
 	    if ( filename[ 0] == '\0') {
-		_makepath( filename2, drv, dir, fname, "com");
+		_makepath( filename2, drv, dir, fname, scom);
 		_searchenv( filename2, CPMPATH, filename);
 	    }
 	} else {
@@ -438,9 +446,9 @@ int load_program( char *pfile)
 	if (( fp = fopen( filename, "rb")) == NULL) return FALSE;
 	_splitpath( filename, drv, dir, fname, ext);
    } else if ( ext[ 0] == '\0'){
-	_makepath( filename, drv, dir, fname, "cpm");
+	_makepath( filename, drv, dir, fname, scpm);
 	if (( fp = fopen( filename, "rb")) == NULL) {
-	    _makepath( filename, drv, dir, fname, "com");
+	    _makepath( filename, drv, dir, fname, scom);
 	    if (( fp = fopen( filename, "rb")) == NULL) return FALSE;
 	}
 	_splitpath( filename, drv, dir, fname, ext);
@@ -490,7 +498,7 @@ void mkFCB( byte *p, char *s)
 char *mk_filename( char *s, byte *fcb)
 {
     int i, j;
-    char *dir;
+    char *dir, *dot=NULL;
 
     i = fcb[ 0];
     if ( i == '?' || i == 0) i = cpm_disk_no;
@@ -508,21 +516,26 @@ char *mk_filename( char *s, byte *fcb)
     for ( j = 8; j >= 1 && fcb[ j] == '?'; j--);
     j++;
     for ( i = 1; i < j; i++) {
-	if ( fcb[ i] == ' ') break;
-	*s++ = fcb[ i];
+		if ( fcb[ i] == ' ') break;
+		*s++ = fcb[ i];
     }
     if ( i == j && i <= 8) *s++ = '*';
 
+	dot=s;
     *s++ = '.';
 
     for ( j = 11; j >= 9 && fcb[ j] == '?'; j--);
     j++;
     for ( i = 9; i < j; i++) {
 	if ( fcb[ i] == ' ') break;
-	*s++ = fcb[ i];
+		*s++ = fcb[ i];
+		dot=NULL;		
     }
     if ( i == j && i <= 11) *s++ = '*';
-    *s = '\0';
+#ifdef __linux__
+	if (dot) s=dot;
+#endif
+	*s = '\0';
     return dir;
 }
 
@@ -543,7 +556,7 @@ struct FCB {
 #define HANDLE void*
 #define INVALID_HANDLE_VALUE (void*)0
 #define FILE_ATTRIBUTE_DIRECTORY S_IFDIR
-#define FILE_ATTRIBUTE_HIDDEN 0
+#define FILE_ATTRIBUTE_HIDDEN 2
 #define chsize ftruncate
 #endif
 
@@ -583,6 +596,10 @@ DIR *FindFirstFile(char* lpFileName,	// pointer to name of file to search for
 		strncpy(ffDir, cpm_drive[ cpm_disk_no], sizeof(ffDir));
 	}
 	strncpy(ffName, cName, sizeof(ffName)-1);
+	if (strncmp(ffName,"*.*",4)==0) {
+		*ffName='*';
+		ffName[1]=0;
+	}
 	CharUpperX(ffName);
 	pDir = opendir(ffDir);
 	if (pDir == NULL) 
@@ -597,7 +614,7 @@ DIR *FindFirstFile(char* lpFileName,	// pointer to name of file to search for
 			}
 			if (!(statbuf.st_mode & S_IFDIR)) {
 				lpFindFileData->cAlternateFileName[0]=0;
-				lpFindFileData->dwFileAttributes=0;		/* ordinal file */	
+				lpFindFileData->dwFileAttributes=(*(lpFindFileData->cFileName)=='.' ? FILE_ATTRIBUTE_HIDDEN : 0);	
 				lpFindFileData->nFileSizeHigh=0;
 				lpFindFileData->nFileSizeLow=(DWORD)statbuf.st_size;
 				return pDir;
@@ -627,7 +644,7 @@ int FindNextFile(
 			}
 			if (!(statbuf.st_mode & S_IFDIR)) {
 				lpFindFileData->cAlternateFileName[0]=0;
-				lpFindFileData->dwFileAttributes=0;		/* ordinal file */	
+				lpFindFileData->dwFileAttributes=(*(lpFindFileData->cFileName)=='.' ? FILE_ATTRIBUTE_HIDDEN : 0);	
 				lpFindFileData->nFileSizeHigh=0;
 				lpFindFileData->nFileSizeLow=(DWORD)statbuf.st_size;
 				return 1;
@@ -718,7 +735,7 @@ byte cpm_findfirst( byte *fcbaddr)
     if ( !*p) p = aFindData.cFileName;
     if ( aFindData.dwFileAttributes & 
 	 (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_HIDDEN)) {
-	return cpm_findnext();
+		return cpm_findnext();
     }
 
     l = aFindData.nFileSizeLow;
@@ -762,9 +779,9 @@ DEBUGOUT( stderr, "REOPEN %d - ", i);
     if ( i >= MAXFCB || !mk_filename( filename, fcbaddr)) return 0xff;
 
     if ( cr == CF_CREATE) {
-	if ( access( filename, F_OK) == 0) return 0xff;
-	if (( fcbs[ i].fp = fopen( filename, "w+b")) == NULL) return 0xff;
-	fcbs[ i].mod = fcbs[ i].wr = TRUE;
+		if ( access( filename, F_OK) == 0) return 0xff;
+		if (( fcbs[ i].fp = fopen( filename, "w+b")) == NULL) return 0xff;
+		fcbs[ i].mod = fcbs[ i].wr = TRUE;
     } else {
 	if (( fcbs[ i].fp = fopen( filename, cr ? "r+b" : "rb")) == NULL)
 	{
@@ -1154,33 +1171,6 @@ void getCursorPosition(int *row, int *col) {
     sscanf(buff, "\x1b[%d;%dR", row, col);
     fseek(stdin, 0, SEEK_END);
 }
-
-#define enable_raw_mode  set_conio_terminal_mode
-#define disable_raw_mode reset_terminal_mode
-/*
-void enable_raw_mode()
-{
-    struct termios term;
-    tcgetattr(0, &term);
-    term.c_lflag &= ~(ICANON | ECHO); // Disable echo as well
-    tcsetattr(0, TCSANOW, &term);
-}
-
-void disable_raw_mode()
-{
-    struct termios term;
-    tcgetattr(0, &term);
-    term.c_lflag |= ICANON | ECHO;
-    tcsetattr(0, TCSANOW, &term);
-}
-
-int kbhit()
-{
-    int byteswaiting;
-    ioctl(0, FIONREAD, &byteswaiting);
-    return byteswaiting > 0;
-}
-*/
 #endif
 
 void w32_gotodxy( int dx, int dy)
@@ -1321,7 +1311,13 @@ void w32_clrln( int arg)
 void w32_scroll( int len)
 {
 #ifdef __linux__
-								/* TODO */
+	if (len<0) {
+		while (len++<0)
+			insLine();
+	} else {
+		while (len-->0)
+			delLine();
+	}								/* TODO */
 #else
 		COORD dst;
     SMALL_RECT src;
@@ -1404,6 +1400,23 @@ void w32_left( void)
 #else
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo( hConOut, &csbi);
+    if ( csbi.dwCursorPosition.X-- > 0) {
+	SetConsoleCursorPosition( hConOut, csbi.dwCursorPosition);
+    } else {
+	csbi.dwCursorPosition.X = csbi.dwSize.X-1;
+	SetConsoleCursorPosition( hConOut, csbi.dwCursorPosition);
+	w32_up();
+    }
+#endif
+}
+
+void w32_right( void)
+{
+#ifdef __linux__
+	moveRight(1); 	fflush(stdout); 
+#else
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo( hConOut, &csbi);
     if ( ++csbi.dwCursorPosition.X < csbi.dwSize.X) {
 	SetConsoleCursorPosition( hConOut, csbi.dwCursorPosition);
     } else {
@@ -1426,7 +1439,7 @@ WORD w32_attr( void)
 }
 
 
-enum { ST_START, ST_NOP, ST_CHAR, ST_ESC, ST_EQ, ST_EQ2, ST_ANSI, ST_EQR};
+enum { ST_START, ST_NOP, ST_CHAR, ST_ESC, ST_EQ, ST_EQ2, ST_ANSI, ST_EQR, ST_1715};
 
 byte color_table[] = { 0, 4, 2, 6, 1, 5, 3, 7};
 byte color_table2[] = { 0, 4, 1, 5, 2, 6, 3, 7};
@@ -1434,17 +1447,6 @@ byte color_table2[] = { 0, 4, 1, 5, 2, 6, 3, 7};
 byte cpm_const( void)
 {
 #ifdef __linux__
-/*	int flags;
-	if (xgch==CON_BUF_EMPTY) 
-	{
-        flags = fcntl(STDIN_FILENO, F_GETFL);
-        fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
-		xgch = getchar();
-		fcntl(STDIN_FILENO, F_SETFL, flags);
-		if (xgch == CON_BUF_EMPTY)
-	        return 0;
-	}
-  	return 0xff; */
 	if (kbhit()) 
 		return 0xff;
 	else
@@ -1469,41 +1471,26 @@ byte cpm_const( void)
 }
 
 #ifdef __linux__
-/* byte getch( void)
-{
-	byte res;
-    while (!cpm_const()) {};
-	res=(byte)xgch;
-	xgch=CON_BUF_EMPTY;
-	return res;
-}
-*/
-
 void my_handler(int s){
 //    printf("^C\r\n");
 }
-static struct termios orig_term;
-static struct termios new_term;
 #else
 BOOL _stdcall console_event_hander( DWORD type)
 {
 //    DWORD n;
-
     if ( type != CTRL_C_EVENT) return FALSE;
     /*reg.x.pc*/ PC = 0;
 //    WriteConsole( hConOut, "^C\r\n", 4, &n, NULL);
     return TRUE;
 }
+#define	reset_terminal_mode() ;
+#define	set_conio_terminal_mode() ;
 #endif
 
 void cpm_conio_setup( void)
 {
 #ifdef __linux__
-    tcgetattr(STDIN_FILENO, &orig_term);
-    new_term = orig_term;
-    new_term.c_lflag &= ~(ICANON | ECHO);
-    tcsetattr(STDIN_FILENO, TCSANOW, &new_term);
-	enable_raw_mode();
+	set_conio_terminal_mode();
 	conout = TRUE;									/* TODO */
 	conin = TRUE;
 #else		
@@ -1521,7 +1508,6 @@ void cpm_conio_setup( void)
 	 GetConsoleMode( hStdIn, &md)) {
 	conin = TRUE;
     }
-
      SetConsoleCtrlHandler( console_event_hander, TRUE);
 #endif
 }
@@ -1529,9 +1515,10 @@ void cpm_conio_setup( void)
 void cpm_conio_restore( void)
 {
 #ifdef __linux__
-	disable_raw_mode();
+	reset_terminal_mode();
 	printf("\x1b[0m");                               // Reset colors
-    tcsetattr(STDIN_FILENO, TCSANOW, &orig_term);    // Reset console mode
+	fflush(stdout);
+	printf("\n");
 #endif
 }
 
@@ -1737,20 +1724,16 @@ byte cpm_getche( void)
 byte cpm_gets( byte *buf)
 {
     int i;
-
-#ifdef __linux__
-	disable_raw_mode();
-#endif
+	reset_terminal_mode();
 	if ( fgets((char *)buf + 2, buf[ 0], stdin) == NULL) {
-#ifdef __linux__
-	enable_raw_mode();
-#endif
-	if ( --eofcount == 0) exit( 0);
-	strcpy((char *)buf + 2, "\x1a\n");
+		set_conio_terminal_mode();
+		if ( --eofcount == 0) {
+			cpm_conio_restore();
+			exit( 0);
+		}
+		strcpy((char *)buf + 2, "\x1a\n");
     }
-#ifdef __linux__
-	enable_raw_mode();
-#endif
+	set_conio_terminal_mode();
     i = strlen((char *)buf + 2);
     if (i > 0) i--;
     buf[ 2 + i] = '\r'; buf[ 1] = (byte)i;
@@ -1766,180 +1749,282 @@ void cpm_putch( int c)
     word cc;
 #endif
     switch ( esc_stat) {
-    case ST_NOP:if ( c != '\r') w32_putch((char)c);
-                return;
-    case ST_START:
-	if ( !conout) {
-	    esc_stat = ST_NOP;
-	    w32_putch(( byte)c);
-	    return;
+		case ST_NOP: if ( c != '\r') putchar((char)c);
+				return;
+		case ST_START:
+			if ( !conout) {
+				esc_stat = ST_NOP;
+				putchar(( byte)c);
+				return;
+			}
+			esc_stat = ST_CHAR;
+		case ST_CHAR:
+			switch ( c) {
+				case '\x0b': w32_up(); 							/* other UP */
+						break;
+				case 8: w32_left();								/* R1715 left */
+						break;
+				case 0x0a: w32_down();							/* R1715 down */
+						break;
+				case 0x0d: w32_gotodxy( -255, 0);				/* Carriage Return */
+						break;
+				case 0x14: w32_cls( 0);							/* R1715 CLReos */
+						break; 
+				case 0x15: w32_right();							/* R1715 RIGHT */
+						break; 
+				case '\x0c': if (R1715) {
+									w32_cls( 2);
+									w32_gotoxy(1,1);
+								}
+								else w32_left();
+							break;
+				case '\x1a': if (R1715)
+								 w32_up();
+								else w32_cls( 2);				/* adm3a clear screen */
+							break;
+				case '\x1b': esc_stat = ST_ESC; 
+							break;
+				case '\x1f': w32_cls(2);                        /* 2019 / VT52 of ORION-128: 1F - CLS+HOME  */
+				case '\x1e': w32_gotoxy(1,1);					/* HOME */
+							break;
+				case '\x7f':									/* DEL: echo BS, space, BS */
+					printf("\b \b");
+					break;
+				case 1: w32_gotoxy(1,1);						/* R-1715 HOME */
+					break;
+				case 2:	insLine();								/* adm3a insert line */
+					break;
+				case 3:	delLine();								/* adm3a delete line */
+					break;
+				case 0x16:										/* 16 = R1715 CLReol */
+				case 0x18: if (R1715) w32_gotodxy( -255, 0);    /* or HOME ? */
+				case 5:											/* adm3a clear to eol */
+					w32_clrln( 0);
+					break;
+				default: if (R1715 && (c==0x82))
+							setCursorOff();
+						 else if (R1715 && (c==0x83))
+							setCursorOn();
+						 else if (R1715 && (c==0x84)) {
+							setTextNoInverted(); setTextNoBold(); setTextNoUnderlined(); setTextNoBlinking(); setTextNormal();
+						 }
+						 else w32_putch((c>128)&&(!NoKOI) ? oriKoi[c & 0x7f] : (char)c); 
+						break;
+			}
+			return;
+		case ST_EQR:											/* ROBOTRON-1715 GotoXY */
+			args[ 1] = (byte)(c - 0x80 + 1);
+			w32_gotoxy( args[ 1], args[ 0]);
+			break;
+		case ST_ESC:
+			if (c>127) {                                        /* ROBOTRON-1715 GotoXY */
+				R1715=TRUE;
+				args[ 0] = (byte)(c - 0x80 + 1);
+				esc_stat = ST_EQR;
+				return;
+			}
+			else
+				switch ( c) {
+					case 0x5e:									/* ROBOTRON-1715 escapes */
+						esc_stat = ST_1715;
+						return;
+					case '6': if (inversed) break;              /* 2019/ VT52 of ORION-128: INVERSE ON */
+						inversed=TRUE;
+#ifdef __linux__
+						setTextInverted();
+#else
+						if (cc=w32_attr())                        /* swap bgIRGB with fgIRGB because COMMON_LVB_REVERSE_VIDEO bit not working */
+                   		   SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc | COMMON_LVB_REVERSE_VIDEO */
+#endif
+						break;
+					case '7': if (!inversed) break;                     /* 2019/ VT52 of ORION-128: INVERSE OFF */
+						inversed=FALSE;
+#ifdef __linux__
+						setTextNoInverted();							
+#else
+						if (cc=w32_attr())
+							SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc & ~COMMON_LVB_REVERSE_VIDEO */
+#endif
+						break;
+//        			case 'E':                                      /* 2019/ VT52 of ORION-128:  CLS (аналог 0C) */
+					case '*': w32_cls( 2); 
+							break;
+					case 'H': w32_gotoxy(1,1);  		/* 2019/ VT52 of ORION-128:  HOME (без очистки экрана) */
+							break;
+					case ':': setCursorOn();
+							break;
+					case ';': setCursorOff();
+							break;		
+					case 'Y':                                        /* 2019 - VT52 gotoxy */
+					case '=': esc_stat = ST_EQ;
+							return;
+					case '(': 
+#ifdef __linux__
+						setTextBold();							
+#else
+						SetConsoleTextAttribute( hConOut, w32_attr() | 8);
+#endif
+						break;
+					case ')': 
+#ifdef __linux__
+						setTextNoBold();							
+#else
+						SetConsoleTextAttribute( hConOut, w32_attr() & ~8); 
+#endif
+						break;
+					case 't':
+					case 'K':                                        /* 2019/ VT52 of ORION-128: CLREOL - стирание до конца строки (вкл-я позицию курсора) */
+					case 'T': w32_clrln( 0);
+						break;
+					case 'J':                                        /* 2019/ VT52 of ORION-128: CLREOS - стирание до конца экрана (включая позицию курсора) */
+					case 'y': w32_cls( 0);
+						break;   // 2012.03 add
+					case 'D': w32_down();
+						break;
+					case 'L':
+					case 'E': w32_scroll( -1);
+						break;
+					case 'M':								/* was:	w32_up(); break; */
+					case 'R': w32_scroll( 1);
+						break;
+					case '[': arg_n = 0;
+							  args[ 0] = args[ 1] = 0;
+							  esc_stat = ST_ANSI; 
+						return;
+					default: if (debug_flag) printf( "ESC%c", c); 
+						break;
+				}
+			break;
+		case ST_1715:			/* ROBOTRON-1715 0x5e escapes */
+			switch ( c) {
+				case 0x40:
+				case 0x44:
+					setTextNoInverted(); setTextNoBold(); setTextNoUnderlined(); setTextNoBlinking(); setTextNormal();
+					break;
+				case 0x41:
+				case 0x45:
+					setTextBold();
+					break;
+				case 0x42:
+				case 0x46:
+					setTextBlinking();
+					break;
+				case 0x43:
+				case 0x47:
+					setTextBold();
+					setTextBlinking();
+					break;
+				case 0x50:
+				case 0x54:
+					setTextNoBold(); setTextNoUnderlined(); setTextNoBlinking(); setTextNormal(); 
+					setTextInverted();
+					break;
+				case 0x51:
+				case 0x55:
+					setTextBold();
+					setTextInverted();
+					break;
+				case 0x52:
+				case 0x56:
+					setTextBlinking();
+					setTextInverted();
+					break;
+				case 0x53:
+				case 0x57:
+					setTextBold();
+					setTextBlinking();
+					setTextInverted();
+					break;
+			}
+			return;
+		case ST_EQ:
+			args[ 0] = (byte)(c - ' ' + 1);
+			esc_stat = ST_EQ2;
+			return;
+		case ST_EQ2:
+			args[ 1] = (byte)(c - ' ' + 1);
+			w32_gotoxy( args[ 1], args[ 0]);
+			break;
+		case ST_ANSI:
+			if ( c >= '0' && c <= '9') {
+				args[ arg_n] = (byte)(args[ arg_n] * 10 + c - '0');
+				return;
+			} else if ( c == ';') {
+				if ( ++arg_n >= sizeof args) --arg_n;
+				args[ arg_n] = 0;
+				return;
+			} else if ( c == 'H' || c == 'f') {
+				w32_gotoxy( args[ 1], args[ 0]);
+			} else if ( c == 'A') {
+				if ( args[ 0] == 0) args[ 0]++;
+				w32_gotodxy( 0, -args[ 0]);
+			} else if ( c == 'B') {
+				if ( args[ 0] == 0) args[ 0]++;
+				w32_gotodxy( 0, args[ 0]);
+			} else if ( c == 'C') {
+				if ( args[ 0] == 0) args[ 0]++;
+				w32_gotodxy( args[ 0], 0);  // 2012.03 ESC[C <=> ESC[D
+			} else if ( c == 'D') {
+				if ( args[ 0] == 0) args[ 0]++;
+				w32_gotodxy( -args[ 0], 0); // 2012.03 ESC[C <=> ESC[D
+			} else if ( c == 'J') {
+				w32_cls( args[ 0]);
+			} else if ( c == 'K') {
+				w32_clrln( args[ 0]);
+			} else if ( c == 'M') {
+				if ( args[ 0] == 0) args[ 0]++; // 2012.03 ESC[M = ESC[1M
+				w32_scroll( args[0]);
+			} else if ( c == 'L') {
+				if ( args[ 0] == 0) args[ 0]++; // 2012.03 ESC[L = ESC[1L
+				w32_scroll( -args[0]);
+			} else if ( c == 'u') {
+				w32_restorexy();
+			} else if ( c == 's') {
+				w32_savexy();
+			} else if ( c == 'm') {
+				int i;
+				word f = 7, b = 0, a = 0;
+				for ( i = 0; i <= arg_n; i++) {
+					c = args[ i];
+					if ( c >= 30 && c <= 37) {
+						f = color_table[ c - 30];
+					} else if ( c >= 40 && c <= 47) {
+						b = color_table[ c - 40];
+					} else if ( c >= 16 && c <= 23) {
+						f = color_table2[ c - 16];
+					} else if ( c == 1) {
+						a |= FOREGROUND_INTENSITY;
+					} else if ( c == 7) {
+						a |= COMMON_LVB_REVERSE_VIDEO;
+					} else if ( c == 4) {
+						a |= COMMON_LVB_UNDERSCORE;
+					}
+				}			
+#ifdef __linux__
+				if ( a & FOREGROUND_INTENSITY) setTextBold();
+					else setTextNoBold();
+				if ( a & COMMON_LVB_REVERSE_VIDEO) setTextInverted();
+					else setTextNoInverted();
+				if ( a & COMMON_LVB_UNDERSCORE) setTextUnderlined();
+					else setTextNoUnderlined();
+				setTextColor(f);
+				setBackgroundColor(b);
+#else
+				word t;
+				f |= a & FOREGROUND_INTENSITY;
+				/* bugbug! REVERSE_VIDEO not work at 2K,XP console */
+				if ( a & COMMON_LVB_REVERSE_VIDEO) { t = f; f = b; b = t;}
+				a &= COMMON_LVB_UNDERSCORE;									/* WTF? */
+				SetConsoleTextAttribute( hConOut, f | (b << 4) | a);
+#endif
+			} else {
+				if (debug_flag) printf( "ESC[n%c", c);
+			}
+			break;
+		default:
+			break;
 	}
 	esc_stat = ST_CHAR;
-    case ST_CHAR:
-    	switch ( c) {
-	case '\x0b': w32_up(); break;
-	case '\x0c': if (R1715) w32_cls( 2);
-                     else w32_left();
-                     break;
-	case '\x1a': w32_cls( 2); break;
-	case '\x1b': esc_stat = ST_ESC; break;
-        case '\x1f': w32_cls(2);                        /* 2019 / VT52 of ORION-128: 1F - CLS+HOME  */
-	case '\x1e': w32_gotoxy(1,1); break;
-	default: w32_putch((c>128)&&(!NoKOI) ? oriKoi[c & 0x7f] : (char)c); break;
-	}
-	return;
-    case ST_EQR:
-	args[ 1] = (byte)(c - 0x80 + 1);
-	w32_gotoxy( args[ 1], args[ 0]);
-	break;
-    case ST_ESC:
-      if (c>127) {                                        /* ROBOTRON-1715 GotoXY */
-         R1715=TRUE;
-	 args[ 0] = (byte)(c - 0x80 + 1);
-         esc_stat = ST_EQR;
-         return;
-      }
-      else
-	switch ( c) {
-        case '6': if (inversed) break;                      /* 2019/ VT52 of ORION-128: INVERSE ON */
-                  inversed=TRUE;
-#ifdef __linux__
-				  setTextInverted();
-#else
-                  if (cc=w32_attr())                        /* swap bgIRGB with fgIRGB because COMMON_LVB_REVERSE_VIDEO bit not working */
-                      SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc | COMMON_LVB_REVERSE_VIDEO */
-#endif
-                  break;
-        case '7': if (!inversed) break;                     /* 2019/ VT52 of ORION-128: INVERSE OFF */
-                  inversed=FALSE;
-#ifdef __linux__
-				  setTextNoInverted();							
-#else
-                  if (cc=w32_attr())
-                      SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc & ~COMMON_LVB_REVERSE_VIDEO */
-#endif
-                  break;
-//        case 'E':                                      /* 2019/ VT52 of ORION-128:  CLS (аналог 0C) */
-	case '*': w32_cls( 2); break;
-        case 'H': w32_gotoxy(1,1); break;                /* 2019/ VT52 of ORION-128:  HOME (без очистки экрана) */
-	case 'Y':                                        /* 2019 - VT52 gotoxy */
-	case '=': esc_stat = ST_EQ; return;
-	case '(': 
-#ifdef __linux__
-			  setTextBold();							
-#else
-			SetConsoleTextAttribute( hConOut, w32_attr() | 8); 
-			break;
-#endif
-	case ')': 
-#ifdef __linux__
-			  setTextNoBold();							
-#else
-			SetConsoleTextAttribute( hConOut, w32_attr() & ~8); 
-#endif
-			break;
-	case 't':
-        case 'K':                                        /* 2019/ VT52 of ORION-128: CLREOL - стирание до конца строки (вкл-я позицию курсора) */
-	case 'T': w32_clrln( 0); break;
-        case 'J':                                        /* 2019/ VT52 of ORION-128: CLREOS - стирание до конца экрана (включая позицию курсора) */
-	case 'y': w32_cls( 0); break;   // 2012.03 add
-	case 'D': w32_down(); break;
-	case 'E': w32_scroll( -1); break;
-	case 'M': w32_up(); break;
-	case 'R': w32_scroll( 1); break;
-	case '[': arg_n = 0; args[ 0] = args[ 1] = 0;
-		  esc_stat = ST_ANSI; return;
-	default: if (debug_flag) printf( "ESC%c", c); break;
-	}
-	break;
-    case ST_EQ:
-	args[ 0] = (byte)(c - ' ' + 1);
-	esc_stat = ST_EQ2;
-	return;
-    case ST_EQ2:
-	args[ 1] = (byte)(c - ' ' + 1);
-	w32_gotoxy( args[ 1], args[ 0]);
-	break;
-    case ST_ANSI:
-	if ( c >= '0' && c <= '9') {
-	    args[ arg_n] = (byte)(args[ arg_n] * 10 + c - '0');
-	    return;
-	} else if ( c == ';') {
-	    if ( ++arg_n >= sizeof args) --arg_n;
-	    args[ arg_n] = 0;
-	    return;
-	} else if ( c == 'H' || c == 'f') {
-	    w32_gotoxy( args[ 1], args[ 0]);
-	} else if ( c == 'A') {
-	    if ( args[ 0] == 0) args[ 0]++;
-	    w32_gotodxy( 0, -args[ 0]);
-	} else if ( c == 'B') {
-	    if ( args[ 0] == 0) args[ 0]++;
-	    w32_gotodxy( 0, args[ 0]);
-	} else if ( c == 'C') {
-	    if ( args[ 0] == 0) args[ 0]++;
-	    w32_gotodxy( args[ 0], 0);  // 2012.03 ESC[C <=> ESC[D
-	} else if ( c == 'D') {
-	    if ( args[ 0] == 0) args[ 0]++;
-	    w32_gotodxy( -args[ 0], 0); // 2012.03 ESC[C <=> ESC[D
-	} else if ( c == 'J') {
-	    w32_cls( args[ 0]);
-	} else if ( c == 'K') {
-	    w32_clrln( args[ 0]);
-	} else if ( c == 'M') {
-	    if ( args[ 0] == 0) args[ 0]++; // 2012.03 ESC[M = ESC[1M
-	    w32_scroll( args[0]);
-	} else if ( c == 'L') {
-	    if ( args[ 0] == 0) args[ 0]++; // 2012.03 ESC[L = ESC[1L
-	    w32_scroll( -args[0]);
-	} else if ( c == 'u') {
-	    w32_restorexy();
-	} else if ( c == 's') {
-	    w32_savexy();
-	} else if ( c == 'm') {
-	    int i;
-	    word f = 7, b = 0, a = 0;
-	    for ( i = 0; i <= arg_n; i++) {
-		c = args[ i];
-		if ( c >= 30 && c <= 37) {
-		    f = color_table[ c - 30];
-		} else if ( c >= 40 && c <= 47) {
-		    b = color_table[ c - 40];
-		} else if ( c >= 16 && c <= 23) {
-		    f = color_table2[ c - 16];
-		} else if ( c == 1) {
-		    a |= FOREGROUND_INTENSITY;
-		} else if ( c == 7) {
-		    a |= COMMON_LVB_REVERSE_VIDEO;
-		} else if ( c == 4) {
-		    a |= COMMON_LVB_UNDERSCORE;
-		}
-	    }
-#ifdef __linux__
-	    if ( a & FOREGROUND_INTENSITY) setTextBold();
-		  else setTextNoBold();
-	    if ( a & COMMON_LVB_REVERSE_VIDEO) setTextInverted();
-		  else setTextNoInverted();
-	    if ( a & COMMON_LVB_UNDERSCORE) setTextUnderlined();
-		  else setTextNoUnderlined();
-		setTextColor(f);
-		setBackgroundColor(b);
-#else
-		word t;
-	    f |= a & FOREGROUND_INTENSITY;
-	    /* bugbug! REVERSE_VIDEO not work at 2K,XP console */
-	    if ( a & COMMON_LVB_REVERSE_VIDEO) { t = f; f = b; b = t;}
-	    a &= COMMON_LVB_UNDERSCORE;									/* WTF? */
-	    SetConsoleTextAttribute( hConOut, f | (b << 4) | a);
-#endif
-	} else {
-	    if (debug_flag) printf( "ESC[n%c", c);
-	}
-	break;
-    default:
-	break;
-    }
-    esc_stat = ST_CHAR;
 }
 
 void help( void)
@@ -1997,7 +2082,7 @@ int main( int argc, char *argv[])
     if ( i >= argc) help();
 
     if ( !load_program( argv[ i])) {
-        fprintf( stderr, "ERROR: program `%s`{.cpm;.com} not found.\n", argv[ 1]);
+        fprintf( stderr, "ERROR: program `%s`{.cpm;.com} not found.\n", argv[ i]);
 #ifdef __linux__
 		fprintf( stderr, "Be careful of case sensitive typeing!\n");
 #endif

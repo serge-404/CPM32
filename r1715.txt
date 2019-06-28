@@ -1,0 +1,64 @@
+HEX
+01	HOME
+07	<nothing>
+08	Cursor LEFT
+0A	Cursor DOWN
+0C	CLS+HOME
+0D	CR
+0E	switch to charset 1
+0F	switch to charset 2
+14	clear to end of screen
+15	Cursor RIGHT
+16	clear to end of line
+18	clear line + home
+1A	Cursor UP
+1B X Y	goto X-0x80,Y-0x80
+82	cursor off
+83	cursor on
+84	normal chars
+
+ Next bytes take 1 byte from screen memory
+85	reverse video
+86	intencive video
+87	intencive+reverse
+
+ Fields Attribute  (takes 1 byte in screen memory)
+1B 5E 40	normal
+1B 5E 41	intensive
+1B 5E 42	flash
+1B 5E 43	flash and intesive
+1B 5E 44	symbols from alternative ROM
+1B 5E 45	the same, but intensive
+1B 5E 46	the same, but flashing
+1B 5E 47	the same, flashing and intensive
+1B 5E 50	-//- reverce
+1B 5E 51	reverce and intensive
+1B 5E 52	reverce and flashing
+1B 5E 53	reverce, flashing and intencive
+1B 5E 54	reverce symbols from altenative charset
+1B 5E 55	reverce and intencive -//-
+1B 5E 56	reverce and flash     -//-
+1B 5E 57	reverce, flash and intencive -//-
+
+Pseudo-graphics ( note! on _my_ 1715 it doesnt work!
+	it may be 1715M only feature)
+
+1B 5F 40	left upper corner,normal
+1B 5F 41	left upper corner,intencive
+1B 5F 42	left upper corner,flash
+1B 5F 43	left upper corner,intencive and flashing
+1B 5F 44	to 47	- right upper corner
+1B 5F 48	to 4B	- left down corner
+1B 5F 4C	to 4F	- right down corner
+1B 5F 50	to 53	-  T corner
+1B 5F 54	to 57	-  -| corner
+1B 5F 58	to 5B	-  |- corner
+
+1B 5F 5C	to 5F	-  T reverce ( up to top )
+1B 5F 60	to 63	- horisontal line
+1B 5F 64	to 67	- vertical line
+1B 5F 68	to 6B	-   +
+
+1B 5F 30	activate ROM 0
+1B 5F 31	activate ROM 1
+

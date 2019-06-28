@@ -98,11 +98,11 @@ static inline void moveTo(int row, int col) {
 }
 
 static inline void saveCursorPosition(void) {
-    printf("\x1b%d", 7);
+    printf("\x1b[s");		/* "\x1b7" */
 }
 
 static inline void restoreCursorPosition(void) {
-    printf("\x1b%d", 8);
+    printf("\x1b[u");		/* "\x1b8" */
 }
 
 static inline void setTextInverted() { 
@@ -133,3 +133,28 @@ static inline void setTextUnderlined() {
 static inline void setTextNoUnderlined() {
     printf("\x1b[24m");
 }
+
+static inline void insLine() {
+    printf("\x1b[L");
+}
+
+static inline void delLine() {
+    printf("\x1b[M");
+}
+
+static inline void setCursorOn() {
+   printf("\x1b[?25h");
+}
+
+static inline void setCursorOff() {
+   printf("\x1b[?25l");
+}
+
+static inline void setTextBlinking() {
+   printf("\x1b[5m");
+}
+
+static inline void setTextNoBlinking() {
+   printf("\x1b[25m");
+}
+
