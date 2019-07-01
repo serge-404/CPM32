@@ -46,17 +46,17 @@ typedef struct _COORD {
     SHORT X;
     SHORT Y;
 } COORD, *PCOORD;
-#define CPMEXT ""
-#define CPMTARGET "LINUX"
+#define APPEXT ""
+#define APPTARGET "LINUX"
 #define CON_BUF_EMPTY -1
 #else
 #include <windows.h>
 #define CH_SLASH '\\'
 #define F_OK 0
-#define CPMEXT ".EXE"
-#define CPMTARGET "WIN32"
+#define APPEXT ".EXE"
+#define APPTARGET "WIN32"
 #endif
-#define CPMVERSION "0.4"
+#define APPVERSION "0.4"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -185,7 +185,15 @@ char filename[ 1024];
 char filename2[ 1024];
 
 #define CPMPATH "CPMPATH"
-
+#ifdef __linux__
+static unsigned short pseudograph[]={
+  0x9691, 0x9692, 0x9693, 0x9482, 0x94a4, 0x95a1, 0x95a2, 0x9596,
+  0x9595, 0x95a3, 0x9591, 0x9597, 0x959d, 0x959c, 0x959b, 0x9490,
+  0x9494, 0x94b4, 0x94ac, 0x949c, 0x9480, 0x94bc, 0x959e, 0x959f,
+  0x959a, 0x9594, 0x95a9, 0x95a6, 0x95a0, 0x9590, 0x95ac, 0x95a7,
+  0x95a8, 0x95a4, 0x95a5, 0x9599, 0x9598, 0x9592, 0x9593, 0x95ab, 
+  0x95aa, 0x9498, 0x948c, 0x9688, 0x9684, 0x968b, 0x9690, 0x9680};
+#endif
 static unsigned char oriKoi[]={
   0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF,
   0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF,
@@ -426,11 +434,14 @@ int load_program( char *pfile)
 	char dir[ _MAX_DIR], fname[ _MAX_FNAME], ext[ _MAX_EXT];
 
    _splitpath( pfile, drv, dir, fname, ext);
-   if ((access(pfile, F_OK) != 0) && uppercase_flag) {
-		CharUpperX(pfile);
+#ifdef __linux__
+	if ((access(pfile, F_OK) != 0) && uppercase_flag) {
+		CharUpperX(fname);
+		CharUpperX(ext);
 		CharUpperX(scpm);
 		CharUpperX(scom);
    }
+#endif
    if ( drv[ 0] == '\0' && dir[ 0] == '\0') {
 	 if ( ext[ 0] == '\0') {
 	    _makepath( filename2, drv, dir, fname, scpm);
@@ -440,7 +451,8 @@ int load_program( char *pfile)
 		_searchenv( filename2, CPMPATH, filename);
 	    }
 	} else {
-	    _searchenv( pfile, CPMPATH, filename);
+		_makepath( filename2, drv, dir, fname, ext);
+	    _searchenv( filename2, CPMPATH, filename);
 	}
 	if ( filename[ 0] == '\0') return FALSE;
 	if (( fp = fopen( filename, "rb")) == NULL) return FALSE;
@@ -1516,9 +1528,6 @@ void cpm_conio_restore( void)
 {
 #ifdef __linux__
 	reset_terminal_mode();
-	printf("\x1b[0m");                               // Reset colors
-	fflush(stdout);
-	printf("\n");
 #endif
 }
 
@@ -1766,9 +1775,9 @@ void cpm_putch( int c)
 						break;
 				case 0x0a: w32_down();							/* R1715 down */
 						break;
-				case 0x0d: w32_gotodxy( -255, 0);				/* Carriage Return */
-						break;
-				case 0x14: w32_cls( 0);							/* R1715 CLReos */
+/*				case 0x0d: w32_gotodxy( -255, 0);				/ * Carriage Return */
+/*						break;
+*/				case 0x14: w32_cls( 0);							/* R1715 CLReos */
 						break; 
 				case 0x15: w32_right();							/* R1715 RIGHT */
 						break; 
@@ -1796,8 +1805,8 @@ void cpm_putch( int c)
 					break;
 				case 3:	delLine();								/* adm3a delete line */
 					break;
-				case 0x16:										/* 16 = R1715 CLReol */
 				case 0x18: if (R1715) w32_gotodxy( -255, 0);    /* or HOME ? */
+				case 0x16: if (! R1715)	break;					/* 16 = R1715 CLReol */
 				case 5:											/* adm3a clear to eol */
 					w32_clrln( 0);
 					break;
@@ -1808,7 +1817,18 @@ void cpm_putch( int c)
 						 else if (R1715 && (c==0x84)) {
 							setTextNoInverted(); setTextNoBold(); setTextNoUnderlined(); setTextNoBlinking(); setTextNormal();
 						 }
-						 else w32_putch((c>128)&&(!NoKOI) ? oriKoi[c & 0x7f] : (char)c); 
+						 else {
+							 if ((c>128)&&(!NoKOI))
+								 c=oriKoi[c & 0x7f];
+#ifdef __linux__
+							 if ((c>=0xb0)&&(c<0xe0)) {  /* MSDOS pseudograph to ASCII */
+								 putchar('\xe2');
+								 putchar((char)(pseudograph[c-0xb0]>>8));
+								 c=pseudograph[c-0xb0] & 0xff;
+							 }
+#endif
+							 w32_putch((char)c);
+						 }
 						break;
 			}
 			return;
@@ -2029,7 +2049,7 @@ void cpm_putch( int c)
 
 void help( void)
 {
-    fprintf( stderr, "CPM" CPMEXT " -- CP/M-80 program EXEcutor for " CPMTARGET " V" CPMVERSION "\n"
+    fprintf( stderr, "CPM" APPEXT " -- CP/M-80 program EXEcutor for " APPTARGET " V" APPVERSION "\n"
 		"Copyright (C) 2004-2012 by K.Murakami\n"
 		"  Usage: CPM [-hxapdCkr][-w[0-9]] command arg1 arg2 ...\n"
 		"	-h .. return HI-TECH C exit code\n"

@@ -13,6 +13,13 @@ void reset_terminal_mode()
 {
     tcsetattr(0, TCSANOW, &orig_termios);
 }
+void reset_terminal_mode_ex()
+{
+	reset_terminal_mode();
+	printf("\x1b[0m");                               // Reset colors
+	fflush(stdout);
+	printf("\n");
+}
 
 void set_conio_terminal_mode()
 {
@@ -23,7 +30,7 @@ void set_conio_terminal_mode()
     memcpy(&new_termios, &orig_termios, sizeof(new_termios));
 
     /* register cleanup handler, and set the new terminal mode */
-    atexit(reset_terminal_mode);
+    atexit(reset_terminal_mode_ex);
     cfmakeraw(&new_termios);
     tcsetattr(0, TCSANOW, &new_termios);
 }
