@@ -115,7 +115,9 @@ int pause_flag;		/* pause before exit */
 int retcode_flag;	/* exit code type: 0..none 1:HI-TECH C 2:BDSC */
 int no_auto_assign;	/* disable auto drive assign */
 int uppercase_flag;	/* force to uppercase */
-int NoKOI=FALSE;         /* prevent AltToKIO8 decoding */
+int NoKOI=FALSE;	/* prevent AltToKIO8 decoding */
+int R1715=FALSE;	/* Robotron1715 terminal support */
+int adm3a=FALSE;	/* Kaypro termial support */ 
 int inversed=FALSE;
 
 enum { RC_HITECH = 1, RC_BDSC};
@@ -172,7 +174,6 @@ byte cpm_usr_no = 0;
 byte cpm_disk_no = 'B'-'A';
 word cpm_dma_addr = 0x80;
 word cpm_version = 0x22;
-int R1715=0;
 word cpm_disk_vct = 0;
 char *cpm_drive[ MAXDRV];
 
@@ -203,45 +204,6 @@ static unsigned char oriKoi[]={
   0xAF, 0xEF, 0xE0, 0xE1, 0xE2, 0xE3, 0xA6, 0xA2, 0xEC, 0xEB, 0xA7, 0xE8, 0xED, 0xE9, 0xE7, 0xEA,
   0x9E, 0x80, 0x81, 0x96, 0x84, 0x85, 0x94, 0x83, 0x95, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E,
   0x8F, 0x9F, 0x90, 0x91, 0x92, 0x93, 0x86, 0x82, 0x9C, 0x9B, 0x87, 0x98, 0x9D, 0x99, 0x97, 0x9A};
-/*
-static unsigned char toAlt[]={
-  0xC4, 0xB3, 0xDA, 0xBF, 0xC0, 0xD9, 0xC3, 0xB4, 0xC2, 0xC1, 0xC5, 0xDF, 0xDC, 0xDB, 0xDD, 0xDE,
-  0xB0, 0xB1, 0xB2, 0xF4, 0xFE, 0xF9, 0xFB, 0xF7, 0xF3, 0xF2, 0xFF, 0xF5, 0xF8, 0xFD, 0xFA, 0xF6,
-  0xCD, 0xBA, 0xD5, 0xF1, 0xD6, 0xC9, 0xB8, 0xB7, 0xBB, 0xD4, 0xD3, 0xC8, 0xBE, 0xBD, 0xBC, 0xC6,
-  0xC7, 0xCC, 0xB5, 0xF0, 0xB6, 0xB9, 0xD1, 0xD2, 0xCB, 0xCF, 0xD0, 0xCA, 0xD8, 0xD7, 0xCE, 0xFC,
-  0xEE, 0xA0, 0xA1, 0xE6, 0xA4, 0xA5, 0xE4, 0xA3, 0xE5, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
-  0xAF, 0xEF, 0xE0, 0xE1, 0xE2, 0xE3, 0xA6, 0xA2, 0xEC, 0xEB, 0xA7, 0xE8, 0xED, 0xE9, 0xE7, 0xEA,
-  0x9E, 0x80, 0x81, 0x96, 0x84, 0x85, 0x94, 0x83, 0x95, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E,
-  0x8F, 0x9F, 0x90, 0x91, 0x92, 0x93, 0x86, 0x82, 0x9C, 0x9B, 0x87, 0x98, 0x9D, 0x99, 0x97, 0x9A};
-
-static unsigned char toKoi[]={
-  0xE1, 0xE2, 0xF7, 0xE7, 0xE4, 0xE5, 0xF6, 0xFA, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF, 0xF0,
-  0xF2, 0xF3, 0xF4, 0xF5, 0xE6, 0xE8, 0xE3, 0xFE, 0xFB, 0xFD, 0xFF, 0xF9, 0xF8, 0xFC, 0xE0, 0xF1,
-  0xC1, 0xC2, 0xD7, 0xC7, 0xC4, 0xC5, 0xD6, 0xDA, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF, 0xD0,
-  0x90, 0x91, 0x92, 0x81, 0x87, 0xB2, 0xB4, 0xA7, 0xA6, 0xB5, 0xA1, 0xA8, 0xAE, 0xAD, 0xAC, 0x83,
-  0x84, 0x89, 0x88, 0x86, 0x80, 0x8A, 0xAF, 0xB0, 0xAB, 0xA5, 0xBB, 0xB8, 0xB1, 0xA0, 0xBE, 0xB9,
-  0xBA, 0xB6, 0xB7, 0xAA, 0xA9, 0xA2, 0xA4, 0xBD, 0xBC, 0x85, 0x82, 0x8D, 0x8C, 0x8E, 0x8F, 0x8B,
-  0xD2, 0xD3, 0xD4, 0xD5, 0xC6, 0xC8, 0xC3, 0xDE, 0xDB, 0xDD, 0xDF, 0xD9, 0xD8, 0xDC, 0xC0, 0xD1,
-  0xB3, 0xA3, 0x99, 0x98, 0x93, 0x9B, 0x9F, 0x97, 0x9C, 0x95, 0x9E, 0x96, 0xBF, 0x9D, 0x94, 0x9A};
-
-char* alt_koi(char* strn, unsigned char* codetable)
-{
-  register BYTE* st;
-  for (st=(BYTE*)strn; *st; st++)
-    if (*st>127) *st=codetable[*st - 128];
-  return strn;
-}
-
-char* alt2koi(char* strn)
-{
-  return alt_koi(strn, toKoi);
-}
-
-char* koi2alt(char* strn)
-{
-  return alt_koi(strn, toAlt);
-}
-*/
 
 char *auto_drive_assign( char **arg)
 {
@@ -377,13 +339,9 @@ char* findPath(char* path, char* env)
 	if (*path == '/' ||   	/* qualified name */
 	    *path == '.')
 		return path;
-	/* search for pathes list */
-	if ((envp = getenv(env)) == NULL) {
-	   envp = StartDir;
-	}
-	/* lookup all pathes */
-	while (*envp) {
-		p = name; 
+	if ((envp = getenv(env)) != NULL)   /* lookup all pathes */
+	  while (*envp) {
+		p = name;
 		while (*envp && (*p = *envp++) != ':') {
 			if ((uint)(p - name) >= sizeof(name))
 				break;
@@ -397,9 +355,11 @@ char* findPath(char* path, char* env)
 		strcpy(p, path);
 		if (access(name, F_OK) == 0)
 			return name;
-	}
-    	if (access(path, F_OK) == 0)	/* file exist in current dir */
-    		return name;
+	  }
+    /* search within startdir */
+	p=buildname(StartDir, path);
+	if (access(p, F_OK) == 0)	/* file exist in current dir */
+		return p;
 	return NULL;
 }
 
@@ -443,33 +403,32 @@ int load_program( char *pfile)
    }
 #endif
    if ( drv[ 0] == '\0' && dir[ 0] == '\0') {
-	 if ( ext[ 0] == '\0') {
-	    _makepath( filename2, drv, dir, fname, scpm);
-	    _searchenv( filename2, CPMPATH, filename);
-	    if ( filename[ 0] == '\0') {
-		_makepath( filename2, drv, dir, fname, scom);
-		_searchenv( filename2, CPMPATH, filename);
-	    }
-	} else {
-		_makepath( filename2, drv, dir, fname, ext);
-	    _searchenv( filename2, CPMPATH, filename);
-	}
-	if ( filename[ 0] == '\0') return FALSE;
-	if (( fp = fopen( filename, "rb")) == NULL) return FALSE;
-	_splitpath( filename, drv, dir, fname, ext);
+	   if ( ext[ 0] == '\0') {
+		   _makepath( filename2, drv, dir, fname, scpm);
+		   _searchenv( filename2, CPMPATH, filename);
+		   if ( filename[ 0] == '\0') {
+			   _makepath( filename2, drv, dir, fname, scom);
+			   _searchenv( filename2, CPMPATH, filename);
+		   }
+	   } else {
+		   _makepath( filename2, drv, dir, fname, ext);
+		   _searchenv( filename2, CPMPATH, filename);
+	   }
+	   if ( filename[ 0] == '\0') return FALSE;
+	   if (( fp = fopen( filename, "rb")) == NULL) return FALSE;
+	   _splitpath( filename, drv, dir, fname, ext);
    } else if ( ext[ 0] == '\0'){
-	_makepath( filename, drv, dir, fname, scpm);
-	if (( fp = fopen( filename, "rb")) == NULL) {
-	    _makepath( filename, drv, dir, fname, scom);
-	    if (( fp = fopen( filename, "rb")) == NULL) return FALSE;
-	}
-	_splitpath( filename, drv, dir, fname, ext);
-    } else {
-	if (( fp = fopen( pfile, "rb")) == NULL) return FALSE;
-    }
-
-    fread( mem + 0x100, 1, BDOS_ORG-0x100, fp);
-    fclose( fp);
+	   _makepath( filename, drv, dir, fname, scpm);
+	   if (( fp = fopen( filename, "rb")) == NULL) {
+		   _makepath( filename, drv, dir, fname, scom);
+		   if (( fp = fopen( filename, "rb")) == NULL) return FALSE;
+	   }
+	   _splitpath( filename, drv, dir, fname, ext);
+   } else {
+	   if (( fp = fopen( pfile, "rb")) == NULL) return FALSE;
+   }
+	fread( mem + 0x100, 1, BDOS_ORG-0x100, fp);
+	fclose( fp);
     if ( stricmp( ext, "COM") == 0)
 		cpm_version = 0x122;
     cpm_drive[ 0] = (char *)malloc( strlen( drv) + strlen( dir) + 1);
@@ -479,7 +438,6 @@ int load_program( char *pfile)
 	_makepath( cpm_drive[ 0], drv, dir, NULL, NULL);
 #endif
 //    cpm_drive[ 1] = "";
-
     return TRUE;
 }
 
@@ -1153,16 +1111,19 @@ void w32_gotoxy( int x, int y)
 }
 
 #ifdef __linux__
-#define cpush(x) {xgch=x;xgch2=CON_BUF_EMPTY;}
-#define cpush2(x) {xgch2=x;}
+#define cpush(x) {xgch=x;xgch2=CON_BUF_EMPTY;xgch3=CON_BUF_EMPTY;}
+#define cpush2(x) {xgch2=x;xgch3=CON_BUF_EMPTY;}
+#define cpush3(x) {xgch3=CON_BUF_EMPTY;}
 int xgch=CON_BUF_EMPTY;
 int xgch2=CON_BUF_EMPTY;
+int xgch3=CON_BUF_EMPTY;
 
 int cpull()
 {
 	int res=xgch;
     xgch=xgch2;
-    xgch2=CON_BUF_EMPTY;	
+    xgch2=xgch3;
+    xgch3=CON_BUF_EMPTY;	
 	return res;
 }
 
@@ -1451,7 +1412,7 @@ WORD w32_attr( void)
 }
 
 
-enum { ST_START, ST_NOP, ST_CHAR, ST_ESC, ST_EQ, ST_EQ2, ST_ANSI, ST_EQR, ST_1715};
+enum { ST_START, ST_NOP, ST_CHAR, ST_ESC, ST_EQ, ST_EQ2, ST_ANSI, ST_EQR, ST_1715, ST_BCODE, ST_CCODE};
 
 byte color_table[] = { 0, 4, 2, 6, 1, 5, 3, 7};
 byte color_table2[] = { 0, 4, 1, 5, 2, 6, 3, 7};
@@ -1753,7 +1714,7 @@ byte cpm_gets( byte *buf)
 void cpm_putch( int c)
 {
     static byte esc_stat, arg_n;
-    static byte args[ 8];
+    static byte args[ 8], ct, cb;
 #ifndef __linux__
     word cc;
 #endif
@@ -1773,26 +1734,27 @@ void cpm_putch( int c)
 						break;
 				case 8: w32_left();								/* R1715 left */
 						break;
-				case 0x0a: w32_down();							/* R1715 down */
+//				case 0x0a: w32_down();							/* R1715 down */
+//						break;
+//				case 0x0d: w32_gotodxy( -255, 0);				/* Carriage Return */
+//						break;
+				case 0x14: w32_cls( 0);							/* R1715 CLReos */
 						break;
-/*				case 0x0d: w32_gotodxy( -255, 0);				/ * Carriage Return */
-/*						break;
-*/				case 0x14: w32_cls( 0);							/* R1715 CLReos */
-						break; 
 				case 0x15: w32_right();							/* R1715 RIGHT */
 						break; 
 				case '\x0c': if (R1715) {
 									w32_cls( 2);
 									w32_gotoxy(1,1);
 								}
+								else if (adm3a) w32_right(); 
 								else w32_left();
-							break;
-				case '\x1a': if (R1715)
-								 w32_up();
-								else w32_cls( 2);				/* adm3a clear screen */
 							break;
 				case '\x1b': esc_stat = ST_ESC; 
 							break;
+				case '\x1a': if (R1715) 
+								w32_up();
+							if (! adm3a)						/* else adm3a clear screen + HOME */
+								break;
 				case '\x1f': w32_cls(2);                        /* 2019 / VT52 of ORION-128: 1F - CLS+HOME  */
 				case '\x1e': w32_gotoxy(1,1);					/* HOME */
 							break;
@@ -1805,11 +1767,16 @@ void cpm_putch( int c)
 					break;
 				case 3:	delLine();								/* adm3a delete line */
 					break;
-				case 0x18: if (R1715) w32_gotodxy( -255, 0);    /* or HOME ? */
-				case 0x16: if (! R1715)	break;					/* 16 = R1715 CLReol */
+				case 0x17:	if (adm3a)
+								w32_cls( 0);					/* R1715 adm3a clreos */
+							break;
+				case 0x18:	if (R1715)
+								w32_gotodxy( -255, 0);    /* or HOME ? */
+							if (!adm3a) break;	
 				case 5:											/* adm3a clear to eol */
 					w32_clrln( 0);
 					break;
+				case 0x16: if (! R1715)	break;					/* 16 = R1715 CLReol */
 				default: if (R1715 && (c==0x82))
 							setCursorOff();
 						 else if (R1715 && (c==0x83))
@@ -1866,18 +1833,40 @@ void cpm_putch( int c)
 							SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc & ~COMMON_LVB_REVERSE_VIDEO */
 #endif
 						break;
-//        			case 'E':                                      /* 2019/ VT52 of ORION-128:  CLS (аналог 0C) */
 					case '*': w32_cls( 2); 
 							break;
-					case 'H': w32_gotoxy(1,1);  		/* 2019/ VT52 of ORION-128:  HOME (без очистки экрана) */
+					case 'H': w32_gotoxy(1,1);  					/* 2019/ VT52 of ORION-128:  HOME (без очистки экрана) */
 							break;
 					case ':': setCursorOn();
 							break;
 					case ';': setCursorOff();
-							break;		
-					case 'Y':                                        /* 2019 - VT52 gotoxy */
+							break;	
+					case 'P': 										/* 2019/ VT52 of ORION-128: colors  1=blue, 2=green, 4=red */
+						ct=c & GREEN_TXT;							/*TODO								1=red,  2=green, 4=blue */
+						if (c & 1) ct+=BLUE_TXT;
+						if (c & 4) ct+=RED_TXT;
+						if (c & 8) setTextColorBright(ct);			/* ORION-128: 8=intence */
+						 else setTextColor(ct);
+					    c = c>>4;
+						cb=c & GREEN_TXT;
+						if (c & 1) cb+=BLUE_TXT;
+						if (c & 4) cb+=RED_TXT;
+						if (c & 8) setBackgroundColorBright(cb);
+						else setBackgroundColor(cb);
+						break;
+					case 'Y':                                    	/* 2019 - VT52 gotoxy */
 					case '=': esc_stat = ST_EQ;
 							return;
+					case 'B':       /* adm3a enable attribute or Orion GetColor */
+						if (adm3a)
+							esc_stat = ST_BCODE;
+						else {			/* Orion-128 */
+							;			/* fill color attributes within current window region */
+						}
+						break;
+					case 'C':       /* adm3a disable attribute or Orion Setcolor */
+						esc_stat = ST_CCODE;
+						break;
 					case '(': 
 #ifdef __linux__
 						setTextBold();							
@@ -1901,8 +1890,12 @@ void cpm_putch( int c)
 						break;   // 2012.03 add
 					case 'D': w32_down();
 						break;
-					case 'L':
-					case 'E': w32_scroll( -1);
+					case 'E': if (! adm3a) {				/* 2019/ VT52 of ORION-128:  CLS */
+								w32_cls( 2);
+								w32_gotoxy(1,1);
+								break;
+							  }
+					case 'L': w32_scroll( -1);
 						break;
 					case 'M':								/* was:	w32_up(); break; */
 					case 'R': w32_scroll( 1);
@@ -1964,6 +1957,71 @@ void cpm_putch( int c)
 		case ST_EQ2:
 			args[ 1] = (byte)(c - ' ' + 1);
 			w32_gotoxy( args[ 1], args[ 0]);
+			break;
+		case ST_BCODE:
+			if (adm3a) {		/* <ESC>+B prefix */
+				switch (c) {
+					case '0': /* start reverse video */
+						setTextInverted();
+						break;
+					case '1': /* start half intensity */
+						setTextBold();
+					break;
+					case '2': /* start blinking */
+						setTextBlinking();
+					break;
+					case '3': /* start underlining */
+						setTextUnderlined();
+					break;
+					case '4': /* cursor on */
+						setCursorOn();
+					break;
+					case '6': /* remember cursor position */
+						saveCursorPosition();
+					break;
+					case '5': /* video mode on */
+					case '7': /* preserve status line */
+						break;
+					default:
+						cpush(0x1b);
+						cpush2('B');
+						cpush3(c);
+				}
+			}
+			break;
+		case ST_CCODE:
+			if (adm3a) {	    /* <ESC>+C prefix */
+				switch (c) {
+					case '0': /* stop reverse video */
+						setTextNoInverted();
+						break;
+					case '1': /* stop half intensity */
+						setTextNoBold();
+						break;
+					case '2': /* stop blinking */
+						setTextNoBlinking();
+						break;
+					case '3': /* stop underlining */
+						setTextNoUnderlined();
+						break;
+					case '4': /* cursor off */
+						setCursorOff();
+						break;
+					case '6': /* restore cursor position */
+						restoreCursorPosition();
+						break;
+					case '5': /* video mode off */
+					case '7': /* don't preserve status line */
+						break;
+					default:
+						cpush(0x1b);
+						cpush2('C');
+						cpush3(c);
+				}
+			}
+			else {			/* Orion-128 */
+				;			/* Select color mode */
+			}
 			break;
 		case ST_ANSI:
 			if ( c >= '0' && c <= '9') {
@@ -2058,8 +2116,9 @@ void help( void)
 		"	-p .. pause before exit\n"
 		"	-d .. disable auto drive assign\n"
 		"	-C .. args to uppercase\n"
-		"	-k .. do not KOI8 conversion\n"
+		"	-8 .. do not KOI8 conversion\n"
 		"	-r .. do Robotron-1715 escapes\n"
+		"	-k .. do Kaypro(adm3a) escapes\n"
 		"	-w[0-9] .. wait on console status check (9:max)\n"
     );
     exit( 1);
@@ -2093,7 +2152,8 @@ int main( int argc, char *argv[])
 	    case 'x': retcode_flag = RC_BDSC; break;
 	    case 'd': no_auto_assign = TRUE; break;
 	    case 'C': uppercase_flag = TRUE; break;
-	    case 'k': NoKOI=TRUE; break;
+	    case '8': NoKOI=TRUE; break;
+		case 'k': adm3a=TRUE; break;
 	    case 'r': R1715=TRUE; break;
 	    default: help();
 	    }
@@ -2104,7 +2164,7 @@ int main( int argc, char *argv[])
     if ( !load_program( argv[ i])) {
         fprintf( stderr, "ERROR: program `%s`{.cpm;.com} not found.\n", argv[ i]);
 #ifdef __linux__
-		fprintf( stderr, "Be careful of case sensitive typeing!\n");
+		fprintf( stderr, "Be careful of case sensitive typeing (or use -C key)!\n");
 #endif
         return -1;
     }

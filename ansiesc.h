@@ -34,21 +34,21 @@ void restoreConsole(void);
 void getCursorPosition(int *row, int *col);
 
 static inline void setTextColor(int code) {
-    printf("\x1b[%dm", code);
+    printf("\x1b[3%dm", code);
 }
 
 static inline void setTextColorBright(int code) {
-    printf("\x1b[%d;1m", code);
+    printf("\x1b[3%d;1m", code);
 }
 
 static inline void setBackgroundColor(int code) {
-    printf("\x1b[%dm", code);
+    printf("\x1b[4%dm", code);
 }
 
 static inline void setBackgroundColorBright(int code) {
-    printf("\x1b[%d;1m", code);
+    printf("\x1b[4%d;1m", code);
 }
-
+	
 static inline void resetColor(void) {
     printf("\x1b[%dm", RESET_COLOR);
 }
