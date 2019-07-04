@@ -552,7 +552,7 @@ DIR *FindFirstFile(char* lpFileName,	// pointer to name of file to search for
     struct stat statbuf;
 	char *cDir, *cName=lpFileName;
 	int szDir;
-	cDir=strrchr(lpFileName, '$');
+	cDir=strrchr(lpFileName, '|');
 	if (cDir==NULL)
 		cDir=strrchr(lpFileName, '/');
 	if ((cDir)!=NULL) { 
@@ -573,7 +573,7 @@ DIR *FindFirstFile(char* lpFileName,	// pointer to name of file to search for
 	CharUpperX(ffName);
 	pDir = opendir(ffDir);
 	if (pDir == NULL) 
-        return INVALID_HANDLE_VALUE;
+        return hFindFile=INVALID_HANDLE_VALUE;
     while ((pDirent = readdir(pDir)) != NULL) {
        	strncpy(lpFindFileData->cFileName, pDirent->d_name, _MAX_PATH-1);
 		if (fnmatch(ffName, CharUpperX(pDirent->d_name), FNM_CASEFOLD)==0) {
@@ -608,9 +608,7 @@ int FindNextFile(
 		if (fnmatch(ffName, CharUpperX(pDirent->d_name), FNM_CASEFOLD)==0) {
 			if (stat(buildname(ffDir,lpFindFileData->cFileName), &statbuf)!=0) { 
 				DEBUGOUT(stderr, "FindNext ERROR: failed while stat file `%s`\n",lpFindFileData->cFileName);
-			   if (hFndFile!=INVALID_HANDLE_VALUE) closedir(hFndFile);
-			   hFindFile=INVALID_HANDLE_VALUE;	
-	 		   return 0;
+				break;
 			}
 			if (!(statbuf.st_mode & S_IFDIR)) {
 				lpFindFileData->cAlternateFileName[0]=0;
@@ -621,8 +619,8 @@ int FindNextFile(
 			}
 		}
     }
-    if (hFndFile!=INVALID_HANDLE_VALUE) closedir(hFndFile);
-    hFindFile=INVALID_HANDLE_VALUE;
+//    if (hFndFile!=INVALID_HANDLE_VALUE) closedir(hFndFile);
+//    hFindFile=INVALID_HANDLE_VALUE;
 	return 0;
 } 
 
@@ -631,9 +629,9 @@ int FindClose(
    )
 {
 	int res;
-	if (hFndFile) {
+	if (hFndFile && (hFndFile!=INVALID_HANDLE_VALUE)) {
 		res=closedir(hFndFile);
-		hFndFile=INVALID_HANDLE_VALUE;
+		hFindFile=INVALID_HANDLE_VALUE;
 		return res==0;
 	}
 	return TRUE;
@@ -906,7 +904,7 @@ byte cpm_file_delete( byte *fcbaddr)
 {
     struct FCB *fcb = (struct FCB *)fcbaddr;
     int i;
-    HANDLE hFindFile;
+    HANDLE hFndFile;
     WIN32_FIND_DATA aFindData;
     char *fname;
     byte st = 0xff;
@@ -920,8 +918,8 @@ DEBUGOUT( stderr, "REUSE %d - ", i);
     }
 
     if (( fname = mk_filename( filename, fcbaddr)) == NULL) return 0xff;
-    hFindFile = FindFirstFile( filename, &aFindData);
-    if ( hFindFile == INVALID_HANDLE_VALUE) return 0xff;
+    hFndFile = FindFirstFile( filename, &aFindData);
+    if ( hFndFile == INVALID_HANDLE_VALUE) return 0xff;
     do {
 	char *p = aFindData.cAlternateFileName;
 	if ( !*p) p = aFindData.cFileName;
@@ -929,8 +927,8 @@ DEBUGOUT( stderr, "REUSE %d - ", i);
 	    strcpy( fname, p);
 	    if ( remove( filename) == 0) st = 0;
 	}
-    } while( FindNextFile( hFindFile, &aFindData));
-    FindClose( hFindFile);
+    } while( FindNextFile( hFndFile, &aFindData));
+    FindClose( hFndFile);
 
     return st;
 }
@@ -1010,16 +1008,16 @@ byte cpm_gettime( byte *buf, time_t t)
 
 byte cpm_disk_reset( void)
 {
-    HANDLE hFindFile;
+    HANDLE hFndFile;
     WIN32_FIND_DATA aFindData;
 
     cpm_disk_no = 0;
     cpm_dma_addr = 0x80;
 
-    sprintf( filename, "%s$*.*", cpm_drive[ cpm_disk_no]);
-    hFindFile = FindFirstFile( filename, &aFindData);
-    if ( hFindFile == INVALID_HANDLE_VALUE) return 0;
-    FindClose( hFindFile);
+    sprintf( filename, "%s|*.*", cpm_drive[ cpm_disk_no]);
+    hFndFile = FindFirstFile( filename, &aFindData);
+    if ( hFndFile == INVALID_HANDLE_VALUE) return 0;
+    FindClose( hFndFile);
     return 0xff;
 }
 
