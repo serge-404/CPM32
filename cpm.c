@@ -56,7 +56,7 @@ typedef struct _COORD {
 #define APPEXT ".EXE"
 #define APPTARGET "WIN32"
 #endif
-#define APPVERSION "0.4"
+#define APPVERSION "0.5"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1111,12 +1111,12 @@ void w32_gotoxy( int x, int y)
 #ifdef __linux__
 #define cpush(x) {xgch=x;xgch2=CON_BUF_EMPTY;xgch3=CON_BUF_EMPTY;}
 #define cpush2(x) {xgch2=x;xgch3=CON_BUF_EMPTY;}
-#define cpush3(x) {xgch3=CON_BUF_EMPTY;}
+#define cpush3(x) {xgch3=x;}
 int xgch=CON_BUF_EMPTY;
 int xgch2=CON_BUF_EMPTY;
 int xgch3=CON_BUF_EMPTY;
 
-int cpull()
+int cpull()					/* FIFO imitation */
 {
 	int res=xgch;
     xgch=xgch2;
