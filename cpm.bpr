@@ -78,7 +78,7 @@ Comments=
 DebugSourceDirs=$(BCB)\source\vcl
 
 [Parameters]
-RunParams=sed.com
+RunParams=rccp
 HostApplication=
 RemoteHost=
 RemotePath=

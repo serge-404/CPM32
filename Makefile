@@ -1,13 +1,13 @@
 ifeq ($(OS),Windows_NT)
-    OBJEXT := .obj
-    BINEXT := .exe
-    CC := bcc32
-    CFLAGS := 
+    OBJEXT = .obj
+    BINEXT = .exe
+    CC = bcc32
+    CFLAGS = 
 else
-    OBJEXT := .o
-    BINEXT := 
-    CC := gcc
-    CFLAGS := -g -Wall
+    OBJEXT = .o
+    BINEXT = 
+    CC = gcc
+    CFLAGS = -g -Wall
 endif
 
 LIBS=					

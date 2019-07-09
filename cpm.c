@@ -48,7 +48,6 @@ typedef struct _COORD {
 } COORD, *PCOORD;
 #define APPEXT ""
 #define APPTARGET "LINUX"
-#define CON_BUF_EMPTY -1
 #else
 #include <windows.h>
 #define CH_SLASH '\\'
@@ -57,6 +56,7 @@ typedef struct _COORD {
 #define APPTARGET "WIN32"
 #endif
 #define APPVERSION "0.5"
+#define CON_BUF_EMPTY -1
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +76,7 @@ typedef struct _COORD {
 #else
 #include <io.h>
 #include <conio.h>
+#define PATH_MAX MAX_PATH
 #endif
 #include <fcntl.h>
 
@@ -194,6 +195,18 @@ static unsigned short pseudograph[]={
   0x959a, 0x9594, 0x95a9, 0x95a6, 0x95a0, 0x9590, 0x95ac, 0x95a7,
   0x95a8, 0x95a4, 0x95a5, 0x9599, 0x9598, 0x9592, 0x9593, 0x95ab, 
   0x95aa, 0x9498, 0x948c, 0x9688, 0x9684, 0x968b, 0x9690, 0x9680};
+#else
+enum Colors {
+    RESET_COLOR,
+    RED_TXT,
+    GREEN_TXT,
+    YELLOW_TXT,
+    BLUE_TXT,
+    MAGENTA_TXT,
+    CYAN_TXT,
+    WHITE_TXT
+};
+
 #endif
 static unsigned char oriKoi[]={
   0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF,
@@ -468,8 +481,10 @@ void mkFCB( byte *p, char *s)
 char *mk_filename( char *s, byte *fcb)
 {
     int i, j;
-    char *dir, *dot=NULL;
-
+    char *dir;
+#ifdef __linux__
+    char *dot=NULL;
+#endif
     i = fcb[ 0];
     if ( i == '?' || i == 0) i = cpm_disk_no;
     else i--;
@@ -491,7 +506,9 @@ char *mk_filename( char *s, byte *fcb)
     }
     if ( i == j && i <= 8) *s++ = '*';
 
+#ifdef __linux__
 	dot=s;
+#endif
     *s++ = '.';
 
     for ( j = 11; j >= 9 && fcb[ j] == '?'; j--);
@@ -499,7 +516,9 @@ char *mk_filename( char *s, byte *fcb)
     for ( i = 9; i < j; i++) {
 	if ( fcb[ i] == ' ') break;
 		*s++ = fcb[ i];
-		dot=NULL;		
+#ifdef __linux__
+		dot=NULL;
+#endif
     }
     if ( i == j && i <= 11) *s++ = '*';
 #ifdef __linux__
@@ -1105,10 +1124,9 @@ void w32_gotoxy( int x, int y)
     if ( y > 0) y--;
     cur.X = (short)x; cur.Y = (short)y;
     SetConsoleCursorPosition( hConOut, cur);
-#endif	
+#endif
 }
 
-#ifdef __linux__
 #define cpush(x) {xgch=x;xgch2=CON_BUF_EMPTY;xgch3=CON_BUF_EMPTY;}
 #define cpush2(x) {xgch2=x;xgch3=CON_BUF_EMPTY;}
 #define cpush3(x) {xgch3=x;}
@@ -1118,13 +1136,14 @@ int xgch3=CON_BUF_EMPTY;
 
 int cpull()					/* FIFO imitation */
 {
-	int res=xgch;
-    xgch=xgch2;
-    xgch2=xgch3;
-    xgch3=CON_BUF_EMPTY;	
-	return res;
+        int res=xgch;
+        xgch=xgch2;
+        xgch2=xgch3;
+        xgch3=CON_BUF_EMPTY;
+        return res;
 }
 
+#ifdef __linux__
 void getCursorPosition(int *row, int *col) {
 	fflush(0);
     printf("\x1b[6n");
@@ -1456,7 +1475,59 @@ BOOL _stdcall console_event_hander( DWORD type)
 }
 #define	reset_terminal_mode() ;
 #define	set_conio_terminal_mode() ;
-#endif
+
+#define setTextUnderlined() ;
+#define setTextBlinking() ;
+#define setTextNoUnderlined() ;
+#define setTextNoBlinking() ;
+#define setTextNormal() ;
+#define saveCursorPosition w32_savexy
+#define restoreCursorPosition w32_restorexy
+
+void setCursorOn(void) {
+  CONSOLE_CURSOR_INFO curinf;
+  if (GetConsoleCursorInfo( hConOut, &curinf)) {
+     curinf.bVisible=TRUE;
+     SetConsoleCursorInfo( hConOut, &curinf);
+  }
+}
+
+void setCursorOff(void) {
+  CONSOLE_CURSOR_INFO curinf;
+  if (GetConsoleCursorInfo( hConOut, &curinf)) {
+     curinf.bVisible=FALSE;
+     SetConsoleCursorInfo( hConOut, &curinf);
+  }
+}
+
+void setTextBold(void) {
+  SetConsoleTextAttribute( hConOut, w32_attr() | 8);
+}
+
+void setTextNoBold(void) {
+  SetConsoleTextAttribute( hConOut, w32_attr() & ~8);
+}
+
+void w32_inverse(void) {
+  WORD cc=w32_attr();
+  if (cc>0)
+    SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc & ~COMMON_LVB_REVERSE_VIDEO */
+}
+
+void setTextInverted(void) {
+  if (!inversed) {
+    inversed=TRUE;
+    w32_inverse();
+  }
+}
+
+void setTextNoInverted(void) {
+  if (inversed) {
+    inversed=FALSE;
+    w32_inverse();
+  }
+}
+#endif
 
 void cpm_conio_setup( void)
 {
@@ -1464,7 +1535,7 @@ void cpm_conio_setup( void)
 	set_conio_terminal_mode();
 	conout = TRUE;									/* TODO */
 	conin = TRUE;
-#else		
+#else
 	DWORD md;
     HANDLE hnd = GetStdHandle( STD_OUTPUT_HANDLE);
 
@@ -1715,6 +1786,7 @@ void cpm_putch( int c)
     static byte args[ 8], ct, cb;
 #ifndef __linux__
     word cc;
+    word t;
 #endif
     switch ( esc_stat) {
 		case ST_NOP: if ( c != '\r') putchar((char)c);
@@ -1761,10 +1833,17 @@ void cpm_putch( int c)
 					break;
 				case 1: w32_gotoxy(1,1);						/* R-1715 HOME */
 					break;
+#ifdef __linux__
 				case 2:	insLine();								/* adm3a insert line */
 					break;
 				case 3:	delLine();								/* adm3a delete line */
 					break;
+#else
+                                case 2:	w32_scroll( -1);
+					break;
+				case 3:	w32_scroll( 1);
+					break;
+#endif
 				case 0x17:	if (adm3a)
 								w32_cls( 0);					/* R1715 adm3a clreos */
 							break;
@@ -1814,22 +1893,12 @@ void cpm_putch( int c)
 						esc_stat = ST_1715;
 						return;
 					case '6': if (inversed) break;              /* 2019/ VT52 of ORION-128: INVERSE ON */
-						inversed=TRUE;
-#ifdef __linux__
 						setTextInverted();
-#else
-						if (cc=w32_attr())                        /* swap bgIRGB with fgIRGB because COMMON_LVB_REVERSE_VIDEO bit not working */
-                   		   SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc | COMMON_LVB_REVERSE_VIDEO */
-#endif
+						inversed=TRUE;
 						break;
 					case '7': if (!inversed) break;                     /* 2019/ VT52 of ORION-128: INVERSE OFF */
+						setTextNoInverted();
 						inversed=FALSE;
-#ifdef __linux__
-						setTextNoInverted();							
-#else
-						if (cc=w32_attr())
-							SetConsoleTextAttribute( hConOut, cc & 0xff00 | ((cc&0xf0)>>4) | ((cc&0x0f)<<4));  /* cc & ~COMMON_LVB_REVERSE_VIDEO */
-#endif
 						break;
 					case '*': w32_cls( 2); 
 							break;
@@ -1843,14 +1912,26 @@ void cpm_putch( int c)
 						ct=c & GREEN_TXT;							/*TODO								1=red,  2=green, 4=blue */
 						if (c & 1) ct+=BLUE_TXT;
 						if (c & 4) ct+=RED_TXT;
-						if (c & 8) setTextColorBright(ct);			/* ORION-128: 8=intence */
-						 else setTextColor(ct);
-					    c = c>>4;
+						if (c & 8)
+#ifdef __linux__
+                                                        setTextColorBright(ct);			/* ORION-128: 8=intence */
+                                                else setTextColor(ct);
+#else
+                                                        ct &= 8;
+#endif
+					        c = c>>4;
 						cb=c & GREEN_TXT;
 						if (c & 1) cb+=BLUE_TXT;
 						if (c & 4) cb+=RED_TXT;
-						if (c & 8) setBackgroundColorBright(cb);
+						if (c & 8)
+#ifdef __linux__
+                                                        setBackgroundColorBright(cb);
 						else setBackgroundColor(cb);
+#else
+                                                        cb &= 8;
+
+                				SetConsoleTextAttribute( hConOut, ct | cb << 4 /* | a */);
+#endif
 						break;
 					case 'Y':                                    	/* 2019 - VT52 gotoxy */
 					case '=': esc_stat = ST_EQ;
@@ -1866,18 +1947,10 @@ void cpm_putch( int c)
 						esc_stat = ST_CCODE;
 						break;
 					case '(': 
-#ifdef __linux__
-						setTextBold();							
-#else
-						SetConsoleTextAttribute( hConOut, w32_attr() | 8);
-#endif
+						setTextBold();
 						break;
-					case ')': 
-#ifdef __linux__
-						setTextNoBold();							
-#else
-						SetConsoleTextAttribute( hConOut, w32_attr() & ~8); 
-#endif
+					case ')':
+						setTextNoBold();
 						break;
 					case 't':
 					case 'K':                                        /* 2019/ VT52 of ORION-128: CLREOL - стирание до конца строки (вкл-я позицию курсора) */
@@ -1900,9 +1973,9 @@ void cpm_putch( int c)
 						break;
 					case '[': arg_n = 0;
 							  args[ 0] = args[ 1] = 0;
-							  esc_stat = ST_ANSI; 
+							  esc_stat = ST_ANSI;
 						return;
-					default: if (debug_flag) printf( "ESC%c", c); 
+					default: if (debug_flag) printf( "ESC%c", c);
 						break;
 				}
 			break;
@@ -1927,7 +2000,7 @@ void cpm_putch( int c)
 					break;
 				case 0x50:
 				case 0x54:
-					setTextNoBold(); setTextNoUnderlined(); setTextNoBlinking(); setTextNormal(); 
+					setTextNoBold(); setTextNoUnderlined(); setTextNoBlinking(); setTextNormal();
 					setTextInverted();
 					break;
 				case 0x51:
@@ -2086,7 +2159,6 @@ void cpm_putch( int c)
 				setTextColor(f);
 				setBackgroundColor(b);
 #else
-				word t;
 				f |= a & FOREGROUND_INTENSITY;
 				/* bugbug! REVERSE_VIDEO not work at 2K,XP console */
 				if ( a & COMMON_LVB_REVERSE_VIDEO) { t = f; f = b; b = t;}

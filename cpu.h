@@ -2070,7 +2070,7 @@ void Z80run(void) {
 			--PC;
                         StopCode=STOP_HALT;
 			goto end_decode;
-			break;
+//			break;
 
 		case 0x77:      /* LD (HL),A */
 			PUT_BYTE(HL, HIGH_REGISTER(AF));
@@ -3976,7 +3976,7 @@ void Z80run(void) {
                         case 0xed:      /* special emulator opcode for BDOS/BIOS call */
                                 StopCode=STOP_NORMAL;
 	        		goto end_decode;
-                                break;
+//                                break;
 			default:    /* ignore ED and following byte */
 				break;
 			}
