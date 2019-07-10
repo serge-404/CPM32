@@ -31,24 +31,22 @@ SOFTWARE.
 /* see main.c for definition */
 
 #ifndef RAM_FAST
-#define RAM mem
 
-uint8* _RamSysAddr(uint16 address) {
-	return(&RAM[address]);
+uint8* _RamAddr(uint16 address) {
+	if (!orion128) return &mem[address];
+	return dispatcher && (address < 0x4000) ? &mem16[address] : 
+	 		( (address < 0xf000) || fullram ? &mem[address] : &mem1024[address]);  
 }
-
+/*
 uint8 _RamRead(uint16 address) {
-	return(RAM[address]);
+	return *_RamAddr(address); 
 }
+*/
+#define _RamRead(x) (*_RamAddr(x)) 
 
 void _RamWrite(uint16 address, uint8 value) {
-	RAM[address] = value;
-}
-
-void _RamWrite16(uint16 address, uint16 value) {
-	// Z80 is a "little indian" (8 bit era joke)
-	_RamWrite(address, value & 0xff);
-	_RamWrite(address + 1, (value >> 8) & 0xff);
+	if ((! orion128) || fullram || (address < 0xf800))
+		*_RamAddr(address)=value;
 }
 #endif
 

@@ -80,6 +80,9 @@ typedef struct _COORD {
 #endif
 #include <fcntl.h>
 
+#define TRUE  1
+#define FALSE 0
+
 #ifdef EM180
 #include "em180.h"
 #else
@@ -96,45 +99,26 @@ typedef unsigned short  uint16;
 typedef unsigned int    uint32;
 #define byte uint8
 #define word uint16
-uint8 mem[ 0x10000];
+
+uint8 mem1024[ 0x100000];
 uint8 guard[ 0x10];
+uint8* mem=mem1024;				/* pointer to current 64k page start { Orion-128 port F9 } */
+uint8* mem16=mem1024;			/* pointer to current 16k page start { Orion-128 port FB[3..0] & ![7] } */
+int dispatcher=FALSE;
+int fullram=FALSE;
+int int50hz=FALSE;
+int orion128=FALSE;
+int	ordfile=0;
+
 #include "ram.h"
 #include "cpu.h"
 #endif
-
-#define TRUE  1
-#define FALSE 0
 
 #define MAXFCB 64
 
 int debug_flag;
 #define DEBUGOUT if (debug_flag) fprintf
 
-/* ============ Configuration variable ============ */
-byte kbwait;		/* wait on console status check */
-int pause_flag;		/* pause before exit */
-int retcode_flag;	/* exit code type: 0..none 1:HI-TECH C 2:BDSC */
-int no_auto_assign;	/* disable auto drive assign */
-int uppercase_flag;	/* force to uppercase */
-int NoKOI=FALSE;	/* prevent AltToKIO8 decoding */
-int R1715=FALSE;	/* Robotron1715 terminal support */
-int adm3a=FALSE;	/* Kaypro termial support */ 
-int inversed=FALSE;
-
-enum { RC_HITECH = 1, RC_BDSC};
-
-/* ============ I/O callback ============ */
-int io_input( int add) {
-    DEBUGOUT( stderr, "ERROR: i/o read port:%04x\n", add);
-    exit( -1);
-    return 0;
-}
-void io_output( int add, int data) {
-    DEBUGOUT( stderr, "ERROR: i/o write port:%04x <- %02x\n", add, data);
-    exit( -1);
-}
-
-/* word[8] DPH; */
 #define DPH_XLT 0      /* DW	xlt	;Address of sector translation table */
 #define DPH_WS1 1      /* DW	0,0,0	;Used as workspace by CP/M */
 #define DPH_WS2 2
@@ -153,6 +137,8 @@ void io_output( int add, int data) {
 #define RET	 0xc9,
 #define HALT	 0x76
 
+#define ROM_ORG  0xf800
+#define ROM_CNT  22
 #define BDOS_ORG 0xff00                         // 0xfe00
 #define BIOS_CNT 17
 #define BIOS_ORG 0x10000-(3*BIOS_CNT)-3         // 0xff00
@@ -166,6 +152,56 @@ void io_output( int add, int data) {
 #define MAXBLK (128*8)                          // 32 bytes ALLOC
 
 #define setword( p, x) { (p) = (byte)(x); (p) = (byte)((x)>>8); }
+
+/* ============ Configuration variable ============ */
+byte kbwait;		/* wait on console status check */
+int pause_flag;		/* pause before exit */
+int retcode_flag;	/* exit code type: 0..none 1:HI-TECH C 2:BDSC */
+int no_auto_assign;	/* disable auto drive assign */
+int uppercase_flag;	/* force to uppercase */
+int NoKOI=FALSE;	/* prevent AltToKIO8 decoding */
+int R1715=FALSE;	/* Robotron1715 terminal support */
+int adm3a=FALSE;	/* Kaypro termial support */ 
+int inversed=FALSE;
+
+enum { RC_HITECH = 1, RC_BDSC};
+
+/* ============ I/O callback ============ */
+int io_input( int add) {
+    DEBUGOUT( stderr, "ERROR: i/o read port:%04x\n", add);
+    exit( -1);
+    return 0; 
+}
+
+void io_output( int add, int data) {
+	int p,i;
+	DEBUGOUT( stderr, "ERROR: i/o write port:%04x <- %02x\n", add, data);
+ 	switch (add) {
+ 		case 0xf9:  mem=&mem1024[(data & 0x0f) * 0x10000];
+			 		goto ori128;
+ 		case 0xfb:  if (data & 0x80) {
+ 			            dispatcher=TRUE;
+ 						mem16=&mem1024[((int)data & 0x0f)<<6];
+ 					}
+		 			else mem16=mem;
+ 					fullram=data & 0x20;
+ 					int50hz=data & 0x40;
+ 		case 0xf8:
+ 		case 0xfa:  
+ori128:				if (orion128==FALSE) {		/* Switch to Orion128 mode and init F800 ROM area */
+ 	 					orion128=TRUE;
+						p = ROM_ORG;
+						for ( i = 0; i < ROM_CNT; i++) {
+							mem1024[ p++] = 0xC3;
+							setword( mem1024[ p++], 3*ROM_CNT+ROM_ORG);	    /*   JP MMMM */
+						}
+						mem1024[ p++] = 0xED; mem1024[ p++] = 0xED;         /* SPECIAL OPCODE */
+						mem1024[ p++] = 0xC9;				          		/*   RET */
+ 					}
+ 					break;
+ 		default: exit( -1);
+	}
+}
 
 /* ================== CP/M BDOS emulation ================== */
 
@@ -187,6 +223,8 @@ char filename[ 1024];
 char filename2[ 1024];
 
 #define CPMPATH "CPMPATH"
+#define ORDPATH "ORDPATH"
+
 #ifdef __linux__
 static unsigned short pseudograph[]={
   0x9691, 0x9692, 0x9693, 0x9482, 0x94a4, 0x95a1, 0x95a2, 0x9596,
@@ -399,6 +437,7 @@ char scom[5]="com";
 int load_program( char *pfile)
 {
     FILE *fp;
+	int ordsize, ordaddr;
 #ifdef __linux__
     char* drv="";
 #else
@@ -413,9 +452,14 @@ int load_program( char *pfile)
 		CharUpperX(ext);
 		CharUpperX(scpm);
 		CharUpperX(scom);
-   }
+	}
 #endif
-   if ( drv[ 0] == '\0' && dir[ 0] == '\0') {
+	if (orion128) {
+		if (stricmp(ext,"ORD")==0) ordfile=1;
+		else if (stricmp(ext,"BRU")==0) ordfile=1;
+		else if (stricmp(ext,"RKO")==0) ordfile=2;
+	} 
+	if ( drv[ 0] == '\0' && dir[ 0] == '\0') {
 	   if ( ext[ 0] == '\0') {
 		   _makepath( filename2, drv, dir, fname, scpm);
 		   _searchenv( filename2, CPMPATH, filename);
@@ -425,7 +469,8 @@ int load_program( char *pfile)
 		   }
 	   } else {
 		   _makepath( filename2, drv, dir, fname, ext);
-		   _searchenv( filename2, CPMPATH, filename);
+		   if (ordfile) _searchenv( filename2, ORDPATH, filename);
+		   else  _searchenv( filename2, CPMPATH, filename);
 	   }
 	   if ( filename[ 0] == '\0') return FALSE;
 	   if (( fp = fopen( filename, "rb")) == NULL) return FALSE;
@@ -440,7 +485,19 @@ int load_program( char *pfile)
    } else {
 	   if (( fp = fopen( pfile, "rb")) == NULL) return FALSE;
    }
-	fread( mem + 0x100, 1, BDOS_ORG-0x100, fp);
+	if (ordfile) {
+		if (ordfile==2)											/* ftRko */
+			fread( mem + 0x100, 1, 77, fp);                     /* skip RKO header */
+		if (fread( mem + 0x100, 1, 16, fp)==16)	{				/* read ordos header */
+			ordsize=*((word*)&mem[0x100+10]);
+			ordaddr=*((word*)&mem[0x100+8]);
+			if (ordsize+ordaddr>=0xf400)
+				ordsize=0xf400-ordaddr;
+			if (ordsize>0)
+				fread( &mem[ordaddr], 1, ordsize, fp);
+		}
+	}
+	else fread( mem + 0x100, 1, BDOS_ORG-0x100, fp);
 	fclose( fp);
     if ( stricmp( ext, "COM") == 0)
 		cpm_version = 0x122;
@@ -2186,6 +2243,7 @@ void help( void)
 		"	-p .. pause before exit\n"
 		"	-d .. disable auto drive assign\n"
 		"	-C .. args to uppercase\n"
+        "   -o .. orion128 ROM F800 mode (+allow exec RKO,ORD)\n"
 		"	-8 .. do not KOI8 conversion\n"
 		"	-r .. do Robotron-1715 escapes\n"
 		"	-k .. do Kaypro(adm3a) escapes\n"
@@ -2197,6 +2255,7 @@ void help( void)
 int main( int argc, char *argv[])
 {
     int st, i, p, q;
+	char hexbuf[6];
     char *arg1, *arg2;
     Z80reset();
 #ifdef __linux__
@@ -2207,27 +2266,28 @@ int main( int argc, char *argv[])
 	cpm_drive[ cpm_disk_no] = StartDir;
 #endif
     for ( i = 1; i < argc; i++) {
-	char *s = argv[ i];
-	if ( *s != '-') break;
-	if ( *++s == '-') { i++; break;}
-	while ( *s) {
-	    switch ( *s++) {
-	    case 'D': debug_flag = TRUE; break;
-	    case 'w': kbwait = ( *s >= '0' && *s <= '9') ?
-	    				 (*s++ - '0' + 1) : 1;
-	    	break;
-	    case 'a': cpm_disk_no = 'A' - 'A'; break;
-	    case 'p': pause_flag = TRUE; break;
-	    case 'h': retcode_flag = RC_HITECH; break;
-	    case 'x': retcode_flag = RC_BDSC; break;
-	    case 'd': no_auto_assign = TRUE; break;
-	    case 'C': uppercase_flag = TRUE; break;
-	    case '8': NoKOI=TRUE; break;
-		case 'k': adm3a=TRUE; break;
-	    case 'r': R1715=TRUE; break;
-	    default: help();
-	    }
-	}
+		char *s = argv[ i];
+		if ( *s != '-') break;
+		if ( *++s == '-') { i++; break;}
+		while ( *s) {
+			switch ( *s++) {
+				case 'D': debug_flag = TRUE; break;
+				case 'w': kbwait = ( *s >= '0' && *s <= '9') ?
+					(*s++ - '0' + 1) : 1;
+					break;
+				case 'a': cpm_disk_no = 'A' - 'A'; break;
+				case 'p': pause_flag = TRUE; break;
+				case 'h': retcode_flag = RC_HITECH; break;
+				case 'x': retcode_flag = RC_BDSC; break;
+				case 'd': no_auto_assign = TRUE; break;
+				case 'C': uppercase_flag = TRUE; break;
+				case 'o': io_output( 0xf8, 0); break;
+				case '8': NoKOI=TRUE; break;
+				case 'k': adm3a=TRUE; break;
+				case 'r': R1715=TRUE; break;
+				default: help();
+			}
+		}
     }
     if ( i >= argc) help();
 
@@ -2238,6 +2298,8 @@ int main( int argc, char *argv[])
 #endif
         return -1;
     }
+
+  if (ordfile==0) {
 	/* setup 0 page */
     p = 0;
     mem[ p++] = 0xC3; setword( mem[ p++], BIOS_ORG + 3);	/* JP WBOOT */
@@ -2257,7 +2319,8 @@ int main( int argc, char *argv[])
 
     /* 2012.03 terminate on "=:;<>" */
     p = ( *arg1 && arg1[1] == ':') ? 2 : 0;
-    for (; (q = arg1[ p]) != '\0' && !strchr("=:;<>", q); p++);
+    for (; (q
+            = arg1[ p]) != '\0' && !strchr("=:;<>", q); p++);
     if ( q) {
         arg1[ p] = '\0';
         mkFCB( mem + 0x5c, arg1);
@@ -2276,7 +2339,6 @@ int main( int argc, char *argv[])
     }
     mem[ p] = '\0';
     mem[ 0x80] = p - 0x81;
-
 
     /* setup BDOS code */
     p = BDOS_ORG;
@@ -2304,7 +2366,8 @@ int main( int argc, char *argv[])
     }
     mem[ p++] = 0xED; mem[ p++] = 0xED;                      /* SPECIAL OPCODE */
     mem[ p++] = 0xC9;				             /*   RET */
-
+  } /* if ordfile==0 */
+	
     /* emulation start */
     cpm_conio_setup();
 #ifdef __linux__
@@ -2510,68 +2573,120 @@ DEBUGOUT( stderr, " with 0 -> %02x\n", /* reg.b.l */ (byte)HL);
 	    }
 	    /* reg.b.a */ ((byte*)&AF)[1] = /* reg.b.l */ (byte)HL; /* reg.b.b */ ((byte*)&BC)[1] = /* reg.b.h */ ((byte*)&HL)[1];
 	  } else if ( (word)PC >= (p=BIOS_ORG) ) {			/* -- BIOS CALL -- */
-	    switch ( q=((word)PrevPC-(word)p) ) {
-	    case  0: 					  /* cold boot */       /* 0 */
-	    case  3:					  /* warm boot */       /* 1 */
-cpm_exit:
-		  if ( pause_flag) while ( cpm_getch() >= ' ');
-		  cpm_conio_restore();	
-		  return  retcode_flag == RC_HITECH ? *(word *)(mem + 0x80) :
-			retcode_flag == RC_BDSC && abort_submit ? 2 : 0;
-	    case  6:		/* const */                                     /* 2 */
-         /* reg.b.a */ ((byte*)&AF)[1] = cpm_const();
-                break;
-	    case  9:		/* conin */                                     /* 3 */
-		/* reg.b.a */ ((byte*)&AF)[1] = cpm_getch();
-                break;
-	    case  12:		/* conout */                                    /* 4 */
-		cpm_putch( /* reg.b.c */ (byte)BC);
-		break;
-	    case  15: 		/* list */                                      /* 5 */
-		cpm_lst_out( /* reg.b.c */ (byte)BC);
-		break;
-	    case  18: 		/* punch */                                     /* 6 */
-		cpm_pun_out( /* reg.b.e */ (byte)DE);
-		break;
-	    case  21: 		/* reader */                                    /* 7 */
-		/* reg.b.a */ ((byte*)&AF)[1] = cpm_rdr_in();
-		break;
-            case  24:           /* home */                                      /* 8 */
-            case  30:           /* settrk */                                    /* 10 */
-            case  33:           /* setsec */                                    /* 11 */
-                break;
-            case  27:           /* seldisk */                                   /* 9 */
-                HL=0;
-                if ( (byte)BC >= MAXDRV) break;
-                if ( cpm_drive[ (byte)BC] == NULL) {
-	          if ( cpm_disk_vct == 0) setup_disk_vct();
-	          if ( cpm_drive[ (byte)BC] == NULL) break;
-                }
-                frameup_dpb_alloc();
-                *((word*)&mem[BIOS_DPH+DPH_XLT])=0;         /* DW	xlt	;Address of sector translation table */
-                *((word*)&mem[BIOS_DPH+DPH_BUF])=128;       /* DW	dirbuf	;Address of a 128-byte sector buffer; this is the same for all DPHs in the system. */
-                *((word*)&mem[BIOS_DPH+DPH_DPB])=DMY_DPB;   /* DW	dpb	;Address of the DPB giving the format of this drive. */
-                *((word*)&mem[BIOS_DPH+DPH_CSV])=0;         /* DW	csv	;Address of the directory checksum vector for this drive. (set=0) */
-                *((word*)&mem[BIOS_DPH+DPH_ALV])=DMY_ALLOC; /* DW	alv	;Address of the allocation vector for this drive. */
-                cpm_disk_no = (byte)BC;
-                HL=BIOS_DPH;
-                break;
-            case  36:           /* setDMA */                                    /* 12 */
-		cpm_dma_addr = (word)BC;
-                HL=0;
-		break;
-            case  45:           /* lststat */                                   /* 15 */
-                ((byte*)&AF)[1] = 0;
-		break;
-            case  48:           /* sectran */                                   /* 16 */
-                HL=(word)BC;
-		break;
-	    default:
-		if (q/3<=BIOS_CNT) fprintf( stderr, "ERROR: Unsupported BIOS call: %x(N%d)\n", (word)PrevPC, q/3);
-		return -1;
-	    }
-          }
+			switch ( q=((word)PrevPC-(word)p) ) {
+				case  0: 					  /* cold boot */       /* 0 */
+				case  3:					  /* warm boot */       /* 1 */
+					cpm_exit:
+					if ( pause_flag) while ( cpm_getch() >= ' ');
+					cpm_conio_restore();
+					return  retcode_flag == RC_HITECH ? *(word *)(mem + 0x80) : retcode_flag == RC_BDSC && abort_submit ? 2 : 0;
+				case  6:		/* const */                                     /* 2 */
+					((byte*)&AF)[1] = cpm_const();
+					break;
+				case  9:		/* conin */                                     /* 3 */
+					((byte*)&AF)[1] = cpm_getch();
+					break;
+				case  12:		/* conout */                                    /* 4 */
+					cpm_putch( /* reg.b.c */ (byte)BC);
+					break;
+				case  15: 		/* list */                                      /* 5 */
+					cpm_lst_out( /* reg.b.c */ (byte)BC);
+					break;
+				case  18: 		/* punch */                                     /* 6 */
+					cpm_pun_out( /* reg.b.e */ (byte)DE);
+					break;
+				case  21: 		/* reader */                                    /* 7 */
+					/* reg.b.a */ ((byte*)&AF)[1] = cpm_rdr_in();
+					break;
+				case  24:           /* home */                                      /* 8 */
+				case  30:           /* settrk */                                    /* 10 */
+				case  33:           /* setsec */                                    /* 11 */
+					break;
+				case  27:           /* seldisk */                                   /* 9 */
+					HL=0;
+					if ( (byte)BC >= MAXDRV) break;
+					if ( cpm_drive[ (byte)BC] == NULL) {
+						if ( cpm_disk_vct == 0) setup_disk_vct();
+						if ( cpm_drive[ (byte)BC] == NULL) break;
+					}
+					frameup_dpb_alloc();
+					*((word*)&mem[BIOS_DPH+DPH_XLT])=0;         /* DW	xlt	;Address of sector translation table */
+					*((word*)&mem[BIOS_DPH+DPH_BUF])=128;       /* DW	dirbuf	;Address of a 128-byte sector buffer; this is the same for all DPHs in the system. */
+					*((word*)&mem[BIOS_DPH+DPH_DPB])=DMY_DPB;   /* DW	dpb	;Address of the DPB giving the format of this drive. */
+					*((word*)&mem[BIOS_DPH+DPH_CSV])=0;         /* DW	csv	;Address of the directory checksum vector for this drive. (set=0) */
+					*((word*)&mem[BIOS_DPH+DPH_ALV])=DMY_ALLOC; /* DW	alv	;Address of the allocation vector for this drive. */
+					cpm_disk_no = (byte)BC;
+					HL=BIOS_DPH;
+					break;
+				case  36:           /* setDMA */                                    /* 12 */
+					cpm_dma_addr = (word)BC;
+					HL=0;
+					break;
+				case  45:           /* lststat */                                   /* 15 */
+					((byte*)&AF)[1] = 0;
+					break;
+				case  48:           /* sectran */                                   /* 16 */
+					HL=(word)BC;
+					break;
+				default:
+					if (q/3<=BIOS_CNT) fprintf( stderr, "ERROR: Unsupported BIOS call: %x(N%d)\n", (word)PrevPC, q/3);
+					return -1;
+			} /* switch */
+	    } else if (orion128 && ((word)PC >= (p=ROM_ORG)) ) {			/* -- ROM F800 CALL -- */
+			switch ( q=((word)PrevPC-(word)p) ) {
+				case  0: goto cpm_exit;									/* cold boot */       
+				case  3: ((byte*)&AF)[1] = cpm_getch();					/* conin */
+				case  6:												/* tape byte in */
+				case 12:												/* tape byte out */
+				case 0x21:												/* user getstr: HL=bufbeg DE=bufend */
+				case 0x24:												/* tape block in */
+				case 0x27:												/* tape block out */
+				case 0x2a:												/* HL=bufbeg DE=bufend; out: BC=CheckSum, HL=DE=bufend */
+				case 0x2d:												/* init font */
+				case 0x33:												/* set ramtop */
+				case 0x3f:												/* beep */
+					break;
+				case  9: cpm_putch( (byte)BC);							/* conout */
+					break;
+				case 15: cpm_putch( ((byte*)&AF)[1]);	
+					break;
+				case 0x12: ((byte*)&AF)[1] = cpm_const();
+					break;
+				case 0x15:												/* print HEX from A */
+					sprintf( hexbuf, "%.2x", (0xffff & AF)>>8 );
+					cpm_putch( hexbuf[1]);	
+					cpm_putch( hexbuf[2]);
+					break;
+				case 0x18:												/* string out */
+					while (mem[(word)HL]) cpm_putch( mem[ HL++]);
+					HL++;
+					break;
+				case 0x1b:
+					((byte*)&AF)[1] = cpm_const() ? cpm_getch() : 0xff;	/* any key presed or 0FFh if not */
+					break;
+				case 0x1e:
+					w32_savexy();
+ 					((byte*)&HL)[1] = cpm_cur.Y;			/* H = cursor row */ 
+					((byte*)&HL)[0] = cpm_cur.X;			/* L = cursor col */
+					break;
+				case 0x30:												/* get RAMTOP */
+					HL=0xbfff;
+					break;
+				case 0x36:												/* read byte from RAM page */
+					((byte*)&BC)[0] = mem1024[(HL & 0xffff)*((byte*)&AF)[1]];
+					break;
+				case 0x39:												/* write byte to RAM page */
+					mem1024[(HL & 0xffff)*((byte*)&AF)[1]] = (byte)BC;
+					break;
+				case 0x3c:												/* set cursor pos */
+					w32_gotoxy( (byte)HL, ((byte*)&HL)[1]);
+					break;
+				default:
+					if (q/3<=ROM_CNT) fprintf( stderr, "ERROR: Unsupported ROM F800 call: %x(N%d)\n", (word)PrevPC, q/3);
+					return -1;
+			}
+		}
+	  }
 	}
-    }
-    return 0;
+	return 0;
 }

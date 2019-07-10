@@ -19,5 +19,5 @@ cpm.o: cpm.c
 	$(CC) -c $(CFLAGS) cpm.c
 
 clean:
-	rm cpm$(OBJEXT)
+	$(RM) cpm$(OBJEXT)
 					
