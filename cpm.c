@@ -109,6 +109,7 @@ int fullram=FALSE;
 int int50hz=FALSE;
 int orion128=FALSE;
 int	ordfile=0;
+int ordaddr=0;
 
 #include "ram.h"
 #include "cpu.h"
@@ -162,7 +163,7 @@ int uppercase_flag;	/* force to uppercase */
 int NoKOI=FALSE;	/* prevent AltToKIO8 decoding */
 int R1715=FALSE;	/* Robotron1715 terminal support */
 int adm3a=FALSE;	/* Kaypro termial support */ 
-int inversed=FALSE;
+int inverted=FALSE;
 
 enum { RC_HITECH = 1, RC_BDSC};
 
@@ -327,8 +328,11 @@ char* CharUpperX(char* st)
 #define stricmp strucmp
 void _splitpath(char *path, char *drive, char *dir, char *name, char *ext)
 {
-	char* cc;
+	char* cc, sz;
+	void* pp;
 	*dir=0; *name=0; *ext=0;
+	pp=malloc((sz=strlen(path))+1);
+	strncpy(pp,path,sz);										/* because dirname flushes `path` */
 	strncpy(name, (cc=basename(path)) ? cc: "", _MAX_FNAME);
 	strncpy(dir,  (cc=dirname(path)) ? cc: "", _MAX_DIR);
 	if ((strcmp(dir,".")==0)&&(*path!='.'))
@@ -337,6 +341,8 @@ void _splitpath(char *path, char *drive, char *dir, char *name, char *ext)
 		strncpy(ext, &cc[1], _MAX_EXT);
 		*cc='\0';
 	}
+	strncpy(path,pp,sz);
+	free(pp);
 }
 
 char *buildname(char* dirnm, char* filenm)
@@ -437,7 +443,7 @@ char scom[5]="com";
 int load_program( char *pfile)
 {
     FILE *fp;
-	int ordsize, ordaddr;
+	int ordsize;
 #ifdef __linux__
     char* drv="";
 #else
@@ -487,8 +493,9 @@ int load_program( char *pfile)
    }
 	if (ordfile) {
 		if (ordfile==2)											/* ftRko */
-			fread( mem + 0x100, 1, 77, fp);                     /* skip RKO header */
-		if (fread( mem + 0x100, 1, 16, fp)==16)	{				/* read ordos header */
+			fread( &(mem[0x100]), 1, 77, fp);                     /* skip RKO header */
+		ordsize=fread( &(mem[0x100]), 1, 16, fp);
+		if (ordsize==16)	{				/* read ordos header */
 			ordsize=*((word*)&mem[0x100+10]);
 			ordaddr=*((word*)&mem[0x100+8]);
 			if (ordsize+ordaddr>=0xf400)
@@ -496,8 +503,12 @@ int load_program( char *pfile)
 			if (ordsize>0)
 				fread( &mem[ordaddr], 1, ordsize, fp);
 		}
+		else {
+			fclose( fp);
+			return FALSE;
+		}
 	}
-	else fread( mem + 0x100, 1, BDOS_ORG-0x100, fp);
+	else fread( &(mem[0x100]), 1, BDOS_ORG-0x100, fp);
 	fclose( fp);
     if ( stricmp( ext, "COM") == 0)
 		cpm_version = 0x122;
@@ -1572,21 +1583,32 @@ void w32_inverse(void) {
 }
 
 void setTextInverted(void) {
-  if (!inversed) {
-    inversed=TRUE;
+  if (!inverted) {
     w32_inverse();
+    inverted=TRUE;
   }
 }
 
 void setTextNoInverted(void) {
-  if (inversed) {
-    inversed=FALSE;
+  if (inverted) {
     w32_inverse();
+    inverted=FALSE;
   }
 }
-#endif
 
-void cpm_conio_setup( void)
+#endif
+
+void toggleInvertion() {
+	if (inverted) {
+		setTextNoInverted();
+	    inverted=FALSE;
+	}
+	else {
+		setTextInverted();
+	    inverted=TRUE;
+	}
+}
+void cpm_conio_setup( void)
 {
 #ifdef __linux__
 	set_conio_terminal_mode();
@@ -1861,9 +1883,9 @@ void cpm_putch( int c)
 						break;
 				case 8: w32_left();								/* R1715 left */
 						break;
-//				case 0x0a: w32_down();							/* R1715 down */
+//				case 0x0a: if (ordfile || R1715) w32_down();	/* R1715 down */
 //						break;
-//				case 0x0d: w32_gotodxy( -255, 0);				/* Carriage Return */
+//				case 0x0d: if (ordfile || R1715) w32_gotodxy( -255, 0);				/* Carriage Return */
 //						break;
 				case 0x14: w32_cls( 0);							/* R1715 CLReos */
 						break;
@@ -1876,36 +1898,34 @@ void cpm_putch( int c)
 								else if (adm3a) w32_right(); 
 								else w32_left();
 							break;
+				case '\x19': if (ordfile)
+								w32_up(); 
+							break;
 				case '\x1b': esc_stat = ST_ESC; 
 							break;
 				case '\x1a': if (R1715) 
 								w32_up();
+							 else if (ordfile)
+								w32_down();
 							if (! adm3a)						/* else adm3a clear screen + HOME */
 								break;
 				case '\x1f': w32_cls(2);                        /* 2019 / VT52 of ORION-128: 1F - CLS+HOME  */
 				case '\x1e': w32_gotoxy(1,1);					/* HOME */
 							break;
-				case '\x7f':									/* DEL: echo BS, space, BS */
-					printf("\b \b");
-					break;
 				case 1: w32_gotoxy(1,1);						/* R-1715 HOME */
 					break;
-#ifdef __linux__
-				case 2:	insLine();								/* adm3a insert line */
+				case 2:	w32_scroll( -1);						/* adm3a insert line - insLine(); */
 					break;
-				case 3:	delLine();								/* adm3a delete line */
+				case 3:	w32_scroll( 1);							/* adm3a delete line - delLine(); */
 					break;
-#else
-                                case 2:	w32_scroll( -1);
-					break;
-				case 3:	w32_scroll( 1);
-					break;
-#endif
 				case 0x17:	if (adm3a)
 								w32_cls( 0);					/* R1715 adm3a clreos */
 							break;
 				case 0x18:	if (R1715)
-								w32_gotodxy( -255, 0);    /* or HOME ? */
+								w32_gotodxy( -255, 0);    		/* or HOME ? */
+							else if (ordfile)
+								w32_right(); 
+							break;
 							if (!adm3a) break;	
 				case 5:											/* adm3a clear to eol */
 					w32_clrln( 0);
@@ -1917,6 +1937,10 @@ void cpm_putch( int c)
 							setCursorOn();
 						 else if (R1715 && (c==0x84)) {
 							setTextNoInverted(); setTextNoBold(); setTextNoUnderlined(); setTextNoBlinking(); setTextNormal();
+						 }
+						 else if (c==0x7f) {
+							 if (ordfile) toggleInvertion();
+							 else if (R1715) printf("\b \b");									/* DEL: echo BS, space, BS */
 						 }
 						 else {
 							 if ((c>128)&&(!NoKOI))
@@ -1949,17 +1973,15 @@ void cpm_putch( int c)
 					case 0x5e:									/* ROBOTRON-1715 escapes */
 						esc_stat = ST_1715;
 						return;
-					case '6': if (inversed) break;              /* 2019/ VT52 of ORION-128: INVERSE ON */
+					case '6': if (inverted) break;              /* 2019/ VT52 of ORION-128: INVERSE ON */
 						setTextInverted();
-						inversed=TRUE;
+						inverted=TRUE;
 						break;
-					case '7': if (!inversed) break;                     /* 2019/ VT52 of ORION-128: INVERSE OFF */
+					case '7': if (!inverted) break;                     /* 2019/ VT52 of ORION-128: INVERSE OFF */
 						setTextNoInverted();
-						inversed=FALSE;
+						inverted=FALSE;
 						break;
 					case '*': w32_cls( 2); 
-							break;
-					case 'H': w32_gotoxy(1,1);  					/* 2019/ VT52 of ORION-128:  HOME (без очистки экрана) */
 							break;
 					case ':': setCursorOn();
 							break;
@@ -1971,10 +1993,10 @@ void cpm_putch( int c)
 						if (c & 4) ct+=RED_TXT;
 						if (c & 8)
 #ifdef __linux__
-                                                        setTextColorBright(ct);			/* ORION-128: 8=intence */
-                                                else setTextColor(ct);
+						    setTextColorBright(ct);			/* ORION-128: 8=intence */
+					    else setTextColor(ct);
 #else
-                                                        ct &= 8;
+					        ct &= 8;
 #endif
 					        c = c>>4;
 						cb=c & GREEN_TXT;
@@ -1982,27 +2004,54 @@ void cpm_putch( int c)
 						if (c & 4) cb+=RED_TXT;
 						if (c & 8)
 #ifdef __linux__
-                                                        setBackgroundColorBright(cb);
+						     setBackgroundColorBright(cb);
 						else setBackgroundColor(cb);
 #else
-                                                        cb &= 8;
-
-                				SetConsoleTextAttribute( hConOut, ct | cb << 4 /* | a */);
+					         cb &= 8;
+						SetConsoleTextAttribute( hConOut, ct | cb << 4 /* | a */);
 #endif
 						break;
 					case 'Y':                                    	/* 2019 - VT52 gotoxy */
 					case '=': esc_stat = ST_EQ;
 							return;
+					case 'A': if (ordfile)			/* Orion-128 */
+								w32_up();
+						break;
 					case 'B':       /* adm3a enable attribute or Orion GetColor */
 						if (adm3a)
 							esc_stat = ST_BCODE;
-						else {			/* Orion-128 */
-							;			/* fill color attributes within current window region */
+						else {
+							if (ordfile)			/* Orion-128 */
+								w32_down();
+													/* else fill color attributes within current window region */
 						}
 						break;
 					case 'C':       /* adm3a disable attribute or Orion Setcolor */
-						esc_stat = ST_CCODE;
+						if (ordfile)
+							w32_right();
+						else esc_stat = ST_CCODE;
 						break;
+					case 'D':
+						if (ordfile)
+							w32_left();
+						else w32_down();
+						break;
+					case 'H': w32_gotoxy(1,1);  					/* 2019/ VT52 of ORION-128:  HOME (без очистки экрана) */
+							break;
+					case 'E': if (! adm3a) {				/* 2019/ VT52 of ORION-128:  CLS */
+								w32_cls( 2);
+								w32_gotoxy(1,1);			/* sure? */
+								break;
+							  }
+					case 'L': w32_scroll( -1);
+						break;
+					case 'M':								/* was:	w32_up(); break; */
+					case 'R': w32_scroll( 1);
+						break;
+					case '[': arg_n = 0;
+							  args[ 0] = args[ 1] = 0;
+							  esc_stat = ST_ANSI;
+						return;
 					case '(': 
 						setTextBold();
 						break;
@@ -2016,22 +2065,6 @@ void cpm_putch( int c)
 					case 'J':                                        /* 2019/ VT52 of ORION-128: CLREOS - стирание до конца экрана (включая позицию курсора) */
 					case 'y': w32_cls( 0);
 						break;   // 2012.03 add
-					case 'D': w32_down();
-						break;
-					case 'E': if (! adm3a) {				/* 2019/ VT52 of ORION-128:  CLS */
-								w32_cls( 2);
-								w32_gotoxy(1,1);
-								break;
-							  }
-					case 'L': w32_scroll( -1);
-						break;
-					case 'M':								/* was:	w32_up(); break; */
-					case 'R': w32_scroll( 1);
-						break;
-					case '[': arg_n = 0;
-							  args[ 0] = args[ 1] = 0;
-							  esc_stat = ST_ANSI;
-						return;
 					default: if (debug_flag) printf( "ESC%c", c);
 						break;
 				}
@@ -2378,10 +2411,15 @@ int main( int argc, char *argv[])
    sigaction(SIGINT, &sigIntHandler, NULL);
 #endif
     memset( guard, HALT, sizeof(guard));
-    /* reg.x.r */ *((byte*)&IR) = (byte)time( NULL);
-    /* reg.x.sp */ SP = BDOS_ORG - 2;
-    /* reg.x.pc */ PC = 0x100;
-     st=5;
+    *((byte*)&IR) = (byte)time( NULL);
+    if (ordfile) {
+		SP = ROM_ORG - 0x440;   /* 0xf3c0*/
+    	PC = ordaddr;
+	} else {
+		SP = BDOS_ORG - 2;
+    	PC = 0x100;
+	}
+    st=5;
     while (st != EMST_STOP) {
         Z80run();
         if (StopCode) {
