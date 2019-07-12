@@ -1598,7 +1598,7 @@ void setTextNoInverted(void) {
 
 #endif
 
-void toggleInvertion() {
+void toggleInvertion(void) {
 	if (inverted) {
 		setTextNoInverted();
 	    inverted=FALSE;
@@ -1923,9 +1923,10 @@ void cpm_putch( int c)
 							break;
 				case 0x18:	if (R1715)
 								w32_gotodxy( -255, 0);    		/* or HOME ? */
-							else if (ordfile)
-								w32_right(); 
-							break;
+							else if (ordfile) {
+								w32_right();
+							        break;
+                                                        }
 							if (!adm3a) break;	
 				case 5:											/* adm3a clear to eol */
 					w32_clrln( 0);
@@ -2276,7 +2277,7 @@ void help( void)
 		"	-p .. pause before exit\n"
 		"	-d .. disable auto drive assign\n"
 		"	-C .. args to uppercase\n"
-        "   -o .. orion128 ROM F800 mode (+allow exec RKO,ORD)\n"
+		"	-o .. orion128 ROM F800 mode (+allow exec RKO,ORD)\n"
 		"	-8 .. do not KOI8 conversion\n"
 		"	-r .. do Robotron-1715 escapes\n"
 		"	-k .. do Kaypro(adm3a) escapes\n"
