@@ -16,11 +16,6 @@
 /*  2012/03 Fix screen control function                      N.F, K.M  */
 /***********************************************************************/
 
-/* for BORAND C++ */
-#ifdef __BORLANDC__
-#pragma resource "cpm.res"
-#endif
-
 /* for VC++ 2008/2010 */
 #ifdef _MSC_VER
 #pragma warning(disable:4996)
