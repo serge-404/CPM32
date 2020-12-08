@@ -21,7 +21,7 @@
 #pragma warning(disable:4996)
 #endif
 
-#ifdef __linux__
+#ifndef _WIN32
 #include <ctype.h>
 #include <libgen.h>
 #define CH_SLASH '/'
@@ -42,13 +42,17 @@ typedef struct _COORD {
     SHORT Y;
 } COORD, *PCOORD;
 #define APPEXT ""
-#define APPTARGET "LINUX"
+#ifdef __linux__
+#define APPTARGET "Linux"
+#else
+#define APPTARGET "MacOS"
+#endif
 #else
 #include <windows.h>
 #define CH_SLASH '\\'
 #define F_OK 0
 #define APPEXT ".EXE"
-#define APPTARGET "WIN32"
+#define APPTARGET "Windows"
 #endif
 #define APPVERSION "0.5"
 #define CON_BUF_EMPTY -1
@@ -58,7 +62,7 @@ typedef struct _COORD {
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
-#ifdef __linux__
+#ifndef _WIN32
 #include <signal.h>
 #include <termios.h>
 #include <unistd.h>
@@ -66,6 +70,7 @@ typedef struct _COORD {
 #include <sys/statvfs.h>
 #include <sys/ioctl.h>
 #include <fnmatch.h>
+#include <limits.h>
 #include "ansiesc.h"
 #include "conio.h"
 #else
@@ -157,7 +162,7 @@ int no_auto_assign;	/* disable auto drive assign */
 int uppercase_flag;	/* force to uppercase */
 int NoKOI=FALSE;	/* prevent AltToKIO8 decoding */
 int R1715=FALSE;	/* Robotron1715 terminal support */
-int adm3a=FALSE;	/* Kaypro termial support */ 
+int adm3a=FALSE;	/* Kaypro termial support */
 int inverted=FALSE;
 
 enum { RC_HITECH = 1, RC_BDSC};
@@ -166,7 +171,7 @@ enum { RC_HITECH = 1, RC_BDSC};
 int io_input( int add) {
     DEBUGOUT( stderr, "ERROR: i/o read port:%04x\n", add);
     exit( -1);
-    return 0; 
+    return 0;
 }
 
 void io_output( int add, int data) {
@@ -183,7 +188,7 @@ void io_output( int add, int data) {
  					fullram=data & 0x20;
  					int50hz=data & 0x40;
  		case 0xf8:
- 		case 0xfa:  
+ 		case 0xfa:
 ori128:				if (orion128==FALSE) {		/* Switch to Orion128 mode and init F800 ROM area */
  	 					orion128=TRUE;
 						p = ROM_ORG;
@@ -221,7 +226,7 @@ char filename2[ 1024];
 #define CPMPATH "CPMPATH"
 #define ORDPATH "ORDPATH"
 
-#ifdef __linux__
+#ifndef _WIN32
 static unsigned short ruspseudo[]={
   0xd090, 0xd091, 0xd092, 0xd093, 0xd094, 0xd095, 0xd096, 0xd097, /* %c%c */
   0xd098, 0xd099, 0xd09a, 0xd09b, 0xd09c, 0xd09d, 0xd09e, 0xd09f, /* %c%c */
@@ -264,7 +269,7 @@ static unsigned char oriKoi[]={
 
 char *auto_drive_assign( char **arg)
 {
-#ifdef __linux__
+#ifndef _WIN32
     struct stat statbuf;
 #endif
     DWORD att;
@@ -275,14 +280,14 @@ char *auto_drive_assign( char **arg)
 
     if ( !no_auto_assign && ( p = strrchr( *arg, CH_SLASH)) != NULL) {
 	*p = '\0';
-#ifdef __linux__
+#ifndef _WIN32
 	att = stat(	*arg, &statbuf);
 #else
 	att = GetFileAttributes( *arg);
 #endif
 	*p = CH_SLASH;
-	if ( *arg == p || 
-#ifdef __linux__
+	if ( *arg == p ||
+#ifndef _WIN32
 	    ( !att && ( statbuf.st_mode & S_IFDIR ))) {
 #else
 	    ( att != (DWORD)-1 && ( att & FILE_ATTRIBUTE_DIRECTORY))) {
@@ -314,7 +319,7 @@ void setup_disk_vct( void)
 char* CharUpperX(char* st)
 {
   char* ss=st;
-  if (st==NULL) 
+  if (st==NULL)
 		return st;
   while (*ss) {
     *ss=toupper(*ss);
@@ -323,7 +328,7 @@ char* CharUpperX(char* st)
   return st;
 }
 
-#ifdef __linux__
+#ifndef _WIN32
 /* Constants for MSC pathname functions */
 #define _MAX_PATH       260
 #define _MAX_DRIVE      3
@@ -341,7 +346,7 @@ void _splitpath(char *path, char *drive, char *dir, char *name, char *ext)
 	strncpy(name, (cc=basename(path)) ? cc: "", _MAX_FNAME);
 	strncpy(dir,  (cc=dirname(path)) ? cc: "", _MAX_DIR);
 	if ((strcmp(dir,".")==0)&&(*path!='.'))
-		*dir=0;								
+		*dir=0;
 	if ((cc=strstr(name, "."))!=NULL) {
 		strncpy(ext, &cc[1], _MAX_EXT);
 		*cc='\0';
@@ -371,7 +376,7 @@ void _makepath(char *path, char *drive, char *dir, char *name, char *ext)
 {
   char *cc;
   if (path) {
-	*path=0; 
+	*path=0;
 	if ((name==NULL)&&(ext==NULL))
 	   strncpy(path, dir, _MAX_DIR);
     else {
@@ -391,7 +396,7 @@ void _makepath(char *path, char *drive, char *dir, char *name, char *ext)
  * 2. else search in all pathes described in env var CPMPATH
  *    (if this var is not exist, StartDir is used)
  * 3. else search in current directory
- * 4. else return NULL 
+ * 4. else return NULL
  */
 char* findPath(char* path, char* env)
 {
@@ -405,7 +410,7 @@ char* findPath(char* path, char* env)
 	  while (*envp) {
 		p = name;
 		while (*envp && (*p = *envp++) != ':') {
-			if ((uint)(p - name) >= sizeof(name))
+			if ((UINT)(p - name) >= sizeof(name))
 				break;
 			++p;
 		}
@@ -432,7 +437,7 @@ char* _searchenv(char *file, char *varname, char *buf)
 }
 
 /* CASE insensitive string compare */
-int strucmp(char *d, char *s)	
+int strucmp(char *d, char *s)
 {
 	register char c1, *s1 = (char *)d, *s2 = (char *)s, c2;
 
@@ -449,15 +454,15 @@ int load_program( char *pfile)
 {
     FILE *fp;
 	int ordsize;
-#ifdef __linux__
+#ifndef _WIN32
     char* drv="";
 #else
     char drv[ _MAX_DRIVE];
-#endif	
+#endif
 	char dir[ _MAX_DIR], fname[ _MAX_FNAME], ext[ _MAX_EXT];
 
    _splitpath( pfile, drv, dir, fname, ext);
-#ifdef __linux__
+#ifndef _WIN32
 	if ((access(pfile, F_OK) != 0) && uppercase_flag) {
 		CharUpperX(fname);
 		CharUpperX(ext);
@@ -469,7 +474,7 @@ int load_program( char *pfile)
 		if (stricmp(ext,"ORD")==0) ordfile=1;
 		else if (stricmp(ext,"BRU")==0) ordfile=1;
 		else if (stricmp(ext,"RKO")==0) ordfile=2;
-	} 
+	}
 	if ( drv[ 0] == '\0' && dir[ 0] == '\0') {
 	   if ( ext[ 0] == '\0') {
 		   _makepath( filename2, drv, dir, fname, scpm);
@@ -518,7 +523,7 @@ int load_program( char *pfile)
     if ( stricmp( ext, "COM") == 0)
 		cpm_version = 0x122;
     cpm_drive[ 0] = (char *)malloc( strlen( drv) + strlen( dir) + 1);
-#ifdef __linux__
+#ifndef _WIN32
 	strcpy( cpm_drive[ 0], dir);
 #else
 	_makepath( cpm_drive[ 0], drv, dir, NULL, NULL);
@@ -555,7 +560,7 @@ char *mk_filename( char *s, byte *fcb)
 {
     int i, j;
     char *dir;
-#ifdef __linux__
+#ifndef _WIN32
     char *dot=NULL;
 #endif
     i = fcb[ 0];
@@ -579,7 +584,7 @@ char *mk_filename( char *s, byte *fcb)
     }
     if ( i == j && i <= 8) *s++ = '*';
 
-#ifdef __linux__
+#ifndef _WIN32
 	dot=s;
 #endif
     *s++ = '.';
@@ -589,12 +594,12 @@ char *mk_filename( char *s, byte *fcb)
     for ( i = 9; i < j; i++) {
 	if ( fcb[ i] == ' ') break;
 		*s++ = fcb[ i];
-#ifdef __linux__
+#ifndef _WIN32
 		dot=NULL;
 #endif
     }
     if ( i == j && i <= 11) *s++ = '*';
-#ifdef __linux__
+#ifndef _WIN32
 	if (dot) s=dot;
 #endif
 	*s = '\0';
@@ -614,7 +619,7 @@ struct FCB {
     byte cr, r0, r1, r2;
 };
 
-#ifdef __linux__
+#ifndef _WIN32
 #define HANDLE void*
 #define INVALID_HANDLE_VALUE (void*)0
 #define FILE_ATTRIBUTE_DIRECTORY S_IFDIR
@@ -624,7 +629,7 @@ struct FCB {
 
 HANDLE hFindFile = INVALID_HANDLE_VALUE;
 
-#ifdef __linux__
+#ifndef _WIN32
 typedef struct {
     DWORD dwFileAttributes;
     DWORD nFileSizeHigh;
@@ -636,8 +641,8 @@ typedef struct {
 char ffName[_MAX_PATH];
 char ffDir[_MAX_PATH];
 
-DIR *FindFirstFile(char* lpFileName,	// pointer to name of file to search for  
-    WIN32_FIND_DATA *lpFindFileData) 	// pointer to returned information 
+DIR *FindFirstFile(char* lpFileName,	// pointer to name of file to search for
+    WIN32_FIND_DATA *lpFindFileData) 	// pointer to returned information
 {
     DIR *pDir;
     struct dirent *pDirent;
@@ -647,7 +652,7 @@ DIR *FindFirstFile(char* lpFileName,	// pointer to name of file to search for
 	cDir=strrchr(lpFileName, '|');
 	if (cDir==NULL)
 		cDir=strrchr(lpFileName, '/');
-	if ((cDir)!=NULL) { 
+	if ((cDir)!=NULL) {
 		cName=cDir+1;
 		cDir=lpFileName;
 		szDir=cName-cDir-1;
@@ -664,19 +669,19 @@ DIR *FindFirstFile(char* lpFileName,	// pointer to name of file to search for
 	}
 	CharUpperX(ffName);
 	pDir = opendir(ffDir);
-	if (pDir == NULL) 
+	if (pDir == NULL)
         return hFindFile=INVALID_HANDLE_VALUE;
     while ((pDirent = readdir(pDir)) != NULL) {
        	strncpy(lpFindFileData->cFileName, pDirent->d_name, _MAX_PATH-1);
 		if (fnmatch(ffName, CharUpperX(pDirent->d_name), FNM_CASEFOLD)==0) {
-			if (stat(buildname(ffDir,lpFindFileData->cFileName), &statbuf)!=0) { 
+			if (stat(buildname(ffDir,lpFindFileData->cFileName), &statbuf)!=0) {
 				closedir(pDir);
 				DEBUGOUT(stderr, "FindFirst ERROR: failed while stat file `%s`\n",lpFindFileData->cFileName);
 	 			return hFindFile=INVALID_HANDLE_VALUE;
 			}
 			if (!(statbuf.st_mode & S_IFDIR)) {
 				lpFindFileData->cAlternateFileName[0]=0;
-				lpFindFileData->dwFileAttributes=(*(lpFindFileData->cFileName)=='.' ? FILE_ATTRIBUTE_HIDDEN : 0);	
+				lpFindFileData->dwFileAttributes=(*(lpFindFileData->cFileName)=='.' ? FILE_ATTRIBUTE_HIDDEN : 0);
 				lpFindFileData->nFileSizeHigh=0;
 				lpFindFileData->nFileSizeLow=(DWORD)statbuf.st_size;
 				return pDir;
@@ -688,8 +693,8 @@ DIR *FindFirstFile(char* lpFileName,	// pointer to name of file to search for
 }
 
 int FindNextFile(
-    DIR *hFndFile,				    	// handle to search  
-    WIN32_FIND_DATA *lpFindFileData) 	// pointer to structure for data on found file  
+    DIR *hFndFile,				    	// handle to search
+    WIN32_FIND_DATA *lpFindFileData) 	// pointer to structure for data on found file
 {
     struct dirent *pDirent;
     struct stat statbuf;
@@ -698,13 +703,13 @@ int FindNextFile(
     while ((pDirent = readdir(hFndFile)) != NULL) {
        	strncpy(lpFindFileData->cFileName, pDirent->d_name, _MAX_PATH-1);
 		if (fnmatch(ffName, CharUpperX(pDirent->d_name), FNM_CASEFOLD)==0) {
-			if (stat(buildname(ffDir,lpFindFileData->cFileName), &statbuf)!=0) { 
+			if (stat(buildname(ffDir,lpFindFileData->cFileName), &statbuf)!=0) {
 				DEBUGOUT(stderr, "FindNext ERROR: failed while stat file `%s`\n",lpFindFileData->cFileName);
 				break;
 			}
 			if (!(statbuf.st_mode & S_IFDIR)) {
 				lpFindFileData->cAlternateFileName[0]=0;
-				lpFindFileData->dwFileAttributes=(*(lpFindFileData->cFileName)=='.' ? FILE_ATTRIBUTE_HIDDEN : 0);	
+				lpFindFileData->dwFileAttributes=(*(lpFindFileData->cFileName)=='.' ? FILE_ATTRIBUTE_HIDDEN : 0);
 				lpFindFileData->nFileSizeHigh=0;
 				lpFindFileData->nFileSizeLow=(DWORD)statbuf.st_size;
 				return 1;
@@ -714,10 +719,10 @@ int FindNextFile(
 //    if (hFndFile!=INVALID_HANDLE_VALUE) closedir(hFndFile);
 //    hFindFile=INVALID_HANDLE_VALUE;
 	return 0;
-} 
+}
 
 int FindClose(
-    DIR *hFndFile 					// file search handle 
+    DIR *hFndFile 					// file search handle
    )
 {
 	int res;
@@ -730,13 +735,13 @@ int FindClose(
 }
 
 int GetDiskFreeSpace(
-    char* lpRootPathName,			// address of root path 
-    DWORD *lpSectorsPerCluster,		// address of sectors per cluster 
-    DWORD *lpBytesPerSector,		// address of bytes per sector 
-    DWORD *lpNumberOfFreeClusters,	// address of number of free clusters  
-    DWORD *lpTotalNumberOfClusters 	// address of total number of clusters  
-   )	
-{ 
+    char* lpRootPathName,			// address of root path
+    DWORD *lpSectorsPerCluster,		// address of sectors per cluster
+    DWORD *lpBytesPerSector,		// address of bytes per sector
+    DWORD *lpNumberOfFreeClusters,	// address of number of free clusters
+    DWORD *lpTotalNumberOfClusters 	// address of total number of clusters
+   )
+{
   struct statvfs stat;
   if (statvfs(lpRootPathName, &stat) != 0) {
     // error happens, just quits here
@@ -761,7 +766,7 @@ byte cpm_findnext( void)
     while ( FindNextFile( hFindFile, &aFindData)) {
 	p = aFindData.cAlternateFileName;
 	if ( !*p) p = aFindData.cFileName;
-	if (( aFindData.dwFileAttributes & 
+	if (( aFindData.dwFileAttributes &
 		(FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_HIDDEN)) == 0) {
 	    DWORD l = aFindData.nFileSizeLow;
 	    if ( aFindData.nFileSizeHigh || l > 0x7fff80) l = 0x7fff80;
@@ -772,7 +777,7 @@ byte cpm_findnext( void)
 	    return 0;
 	}
     }
-    FindClose( hFindFile); 
+    FindClose( hFindFile);
     hFindFile = INVALID_HANDLE_VALUE;
     return 0xff;
 }
@@ -793,7 +798,7 @@ byte cpm_findfirst( byte *fcbaddr)
 
     p = aFindData.cAlternateFileName;
     if ( !*p) p = aFindData.cFileName;
-    if ( aFindData.dwFileAttributes & 
+    if ( aFindData.dwFileAttributes &
 	 (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_HIDDEN)) {
 		return cpm_findnext();
     }
@@ -820,16 +825,16 @@ byte cpm_file_open( byte *fcbaddr, int cr)
     int i;
     int d = 0;
     struct FCB *fcb = (struct FCB *)fcbaddr;
-#ifdef __linux__
-	DIR *hFndFile;	
+#ifndef _WIN32
+	DIR *hFndFile;
 	WIN32_FIND_DATA aFindData;
 	char dir[ _MAX_DIR], fname[ _MAX_FNAME], ext[ _MAX_EXT];
 #endif
-    if (( i = fcb->d[ 0]) > 0 && --i < MAXFCB && 
+    if (( i = fcb->d[ 0]) > 0 && --i < MAXFCB &&
       fcbs[ i].addr == fcbaddr && fcbs[ i].fp) {
 DEBUGOUT( stderr, "REOPEN %d - ", i);
       fclose( fcbs[ i].fp); fcbs[ i].fp = NULL;
-    } else { // 2008.12 FCB‚рѓNѓЉѓA‚·‚йѓAѓvѓЉ‚Й‘О‰ћ
+    } else { // 2008.12 FCBпїЅпїЅпїЅNпїЅпїЅпїЅAпїЅпїЅпїЅпїЅпїЅAпїЅvпїЅпїЅпїЅЙ‘О‰пїЅ
       for ( i = 0; i < MAXFCB && fcbs[ i].fp; i++) {
         if ( fcbs[ i].addr == fcbaddr) {
            fclose( fcbs[ i].fp); fcbs[ i].fp = NULL; break;
@@ -845,8 +850,8 @@ DEBUGOUT( stderr, "REOPEN %d - ", i);
     } else {
 	if (( fcbs[ i].fp = fopen( filename, cr ? "r+b" : "rb")) == NULL)
 	{
-#ifdef __linux__
-		if ((hFndFile=FindFirstFile( filename, &aFindData))==INVALID_HANDLE_VALUE) 
+#ifndef _WIN32
+		if ((hFndFile=FindFirstFile( filename, &aFindData))==INVALID_HANDLE_VALUE)
 			return 0xff;
 		_splitpath( filename, NULL, dir, fname, ext);
 		fcbs[ i].fp = fopen( buildname(dir, aFindData.cFileName), cr ? "r+b" : "rb");
@@ -922,7 +927,7 @@ byte cpm_file_rw( byte *fcbaddr, byte wr, int rnd)
     }
     max = fcb->d[1] + (fcb->d[2] << 8) + (fcb->d[3] << 16);
 
-DEBUGOUT( stderr, "BDOS: %s%s file '%11.11s'. @%d", 
+DEBUGOUT( stderr, "BDOS: %s%s file '%11.11s'. @%d",
       rnd ? "random ": "", wr ? "write" : "read", fcbaddr + 1, p);
 
     if (( i = fcb->d[ 0]) == 0 || --i >= MAXFCB || fcbs[ i].fp == NULL) {
@@ -985,7 +990,7 @@ byte cpm_file_size( byte *fcbaddr)
     if ( cpm_file_open( fcbaddr, CF_OPEN)) return 0xff;
     d = fcb->d[1] + (fcb->d[2] << 8) + (fcb->d[3] << 16);
     fcb->r0 = (byte)d;
-    fcb->r1 = (byte)(d >> 8); 
+    fcb->r1 = (byte)(d >> 8);
     fcb->r2 = (byte)(d >> 16);
     cpm_file_close( fcbaddr);
 
@@ -1003,7 +1008,7 @@ byte cpm_file_delete( byte *fcbaddr)
 
     if ( memcmp( fcbaddr, "\1$$$     SUB", 1+8+3) == 0) abort_submit = TRUE;
 
-    if (( i = fcb->d[ 0]) > 0 && --i < MAXFCB && 
+    if (( i = fcb->d[ 0]) > 0 && --i < MAXFCB &&
 		fcbs[ i].addr == fcbaddr && fcbs[ i].fp) {
 DEBUGOUT( stderr, "REUSE %d - ", i);
 	fclose( fcbs[ i].fp); fcbs[ i].fp = NULL;
@@ -1039,7 +1044,7 @@ byte cpm_set_rndrec( byte *fcbaddr)
     unsigned d = (fcb->cr & 0x7f) + (fcb->ex << 7); /* 2012.02 bugfix 8->7 */
 
     fcb->r0 = (byte)d;
-    fcb->r1 = (byte)(d >> 8); 
+    fcb->r1 = (byte)(d >> 8);
     fcb->r2 = (byte)(d >> 16);
 
     return 0;
@@ -1166,20 +1171,20 @@ void cpm_pun_out( byte c)	/* PUN: out */
 }
 
 /* ================== CP/M consol emulation ================== */
-#ifndef __linux__
+#ifdef _WIN32
 HANDLE hConOut = INVALID_HANDLE_VALUE;
 HANDLE hStdIn = INVALID_HANDLE_VALUE;
 #endif
-int conout;	/* •WЏЂЏo—Н‚НѓRѓ“ѓ\Ѓ[ѓ‹ЃH */
-int conin;	/* •WЏЂ“ь—Н‚НѓRѓ“ѓ\Ѓ[ѓ‹ЃH */
+int conout;	/* пїЅWпїЅпїЅпїЅoпїЅН‚НѓRпїЅпїЅпїЅ\пїЅ[пїЅпїЅпїЅH */
+int conin;	/* пїЅWпїЅпїЅпїЅпїЅпїЅН‚НѓRпїЅпїЅпїЅ\пїЅ[пїЅпїЅпїЅH */
 int eofcount = 16;
 COORD cpm_cur;
 
 void w32_putch( byte c)
 {
-#ifdef __linux__
+#ifndef _WIN32
 	putchar(c);
-	fflush(stdout); 
+	fflush(stdout);
 #else
     DWORD n;
     WriteConsole( hConOut, &c, 1, &n, NULL);
@@ -1188,7 +1193,7 @@ void w32_putch( byte c)
 
 void w32_gotoxy( int x, int y)
 {
-#ifdef __linux__
+#ifndef _WIN32
 	moveTo((short)y,(short)x);
 	fflush(stdout);
 #else
@@ -1216,7 +1221,7 @@ int cpull()					/* FIFO imitation */
         return res;
 }
 
-#ifdef __linux__
+#ifndef _WIN32
 void getCursorPosition(int *row, int *col) {
 	fflush(0);
     printf("\x1b[6n");
@@ -1230,7 +1235,7 @@ void getCursorPosition(int *row, int *col) {
             buff[indx + 1] = '\0';
             break;
         }
-    }    
+    }
     sscanf(buff, "\x1b[%d;%dR", row, col);
     fseek(stdin, 0, SEEK_END);
 }
@@ -1238,7 +1243,7 @@ void getCursorPosition(int *row, int *col) {
 
 void w32_gotodxy( int dx, int dy)
 {
-#ifdef __linux__
+#ifndef _WIN32
 	int x,y,sx=80,sy=24;
 #ifdef TIOCGSIZE
     struct ttysize ts;
@@ -1272,12 +1277,12 @@ void w32_gotodxy( int dx, int dy)
     csbi.dwCursorPosition.X = (short)dx;
     csbi.dwCursorPosition.Y = (short)dy;
     SetConsoleCursorPosition( hConOut, csbi.dwCursorPosition);
-#endif	
+#endif
 }
 
 void w32_savexy( void)
 {
-#ifdef __linux__
+#ifndef _WIN32
 	int x,y;
 	getCursorPosition(&y,&x);
 	cpm_cur.Y=(SHORT)y; cpm_cur.X=(SHORT)x;
@@ -1290,7 +1295,7 @@ void w32_savexy( void)
 
 void w32_restorexy( void)
 {
-#ifdef __linux__
+#ifndef _WIN32
 	moveTo((short)cpm_cur.Y,(short)cpm_cur.X);
 	fflush(stdout);
 #else
@@ -1300,7 +1305,7 @@ void w32_restorexy( void)
 
 void w32_cls( int arg)
 {
-#ifdef __linux__
+#ifndef _WIN32
     if ( arg == 0) {							/* CUR to end of screen */
 		clearScreenToBottom();
 	} else if ( arg == 1) {					 	/* screen top to CUR */
@@ -1308,7 +1313,7 @@ void w32_cls( int arg)
 	} else {									/* ALL of SCREEN */
 		clearScreen();
     }
-	fflush(stdout); 
+	fflush(stdout);
 #else
     DWORD n, size;
     WORD attr;
@@ -1324,7 +1329,7 @@ void w32_cls( int arg)
 	size = csbi.dwSize.X * (csbi.dwSize.Y - csbi.dwCursorPosition.Y)
 		- csbi.dwCursorPosition.X;
     } else if ( arg == 1) {
-	size = csbi.dwSize.X * csbi.dwCursorPosition.Y 
+	size = csbi.dwSize.X * csbi.dwCursorPosition.Y
 		+ csbi.dwCursorPosition.X + 1; 	/* screen top to CUR */
     } else {
 	size = csbi.dwSize.X * csbi.dwSize.Y;	/* ALL of SCREEN */
@@ -1338,7 +1343,7 @@ void w32_cls( int arg)
 
 void w32_clrln( int arg)
 {
-#ifdef __linux__
+#ifndef _WIN32
     if ( arg == 0) {					/* CUR to EOL */
 		clearLineToRight();
     } else if ( arg == 1) {				/* TOL to CUR */
@@ -1346,7 +1351,7 @@ void w32_clrln( int arg)
 	} else {							/* ALL LINE */
 		clearLine();
 	}
-	fflush(stdout); 
+	fflush(stdout);
 #else
 	DWORD n, size;
     WORD attr;
@@ -1373,7 +1378,7 @@ void w32_clrln( int arg)
 
 void w32_scroll( int len)
 {
-#ifdef __linux__
+#ifndef _WIN32
 	if (len<0) {
 		while (len++<0)
 			insLine();
@@ -1388,7 +1393,7 @@ void w32_scroll( int len)
     CONSOLE_SCREEN_BUFFER_INFO csbi;
 
     GetConsoleScreenBufferInfo( hConOut, &csbi);
-    src.Left = 0; 
+    src.Left = 0;
     src.Top = (short)(csbi.dwCursorPosition.Y + (( len >= 0) ? len : 0));
     src.Right = (short)(csbi.dwSize.X - 1);
     src.Bottom = (short)(csbi.dwSize.Y - 1);
@@ -1403,8 +1408,8 @@ void w32_scroll( int len)
 
 void w32_up( void)
 {
-#ifdef __linux__
-	moveUp(1); 	fflush(stdout); 
+#ifndef _WIN32
+	moveUp(1); 	fflush(stdout);
 #else
     COORD dst;
     SMALL_RECT src;
@@ -1431,8 +1436,8 @@ void w32_up( void)
 
 void w32_down( void)
 {
-#ifdef __linux__
-	moveDown(1); 	fflush(stdout); 
+#ifndef _WIN32
+	moveDown(1); 	fflush(stdout);
 #else
     COORD dst;
     SMALL_RECT src;
@@ -1458,8 +1463,8 @@ void w32_down( void)
 
 void w32_left( void)
 {
-#ifdef __linux__
-	moveLeft(1); 	fflush(stdout); 
+#ifndef _WIN32
+	moveLeft(1); 	fflush(stdout);
 #else
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo( hConOut, &csbi);
@@ -1475,8 +1480,8 @@ void w32_left( void)
 
 void w32_right( void)
 {
-#ifdef __linux__
-	moveRight(1); 	fflush(stdout); 
+#ifndef _WIN32
+	moveRight(1); 	fflush(stdout);
 #else
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo( hConOut, &csbi);
@@ -1492,13 +1497,13 @@ void w32_right( void)
 
 WORD w32_attr( void)
 {
-#ifdef __linux__
+#ifndef _WIN32
 	return 7;		/* text=white, back=black */
 #else
 	CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo( hConOut, &csbi);
     return csbi.wAttributes;
-#endif	
+#endif
 }
 
 
@@ -1509,8 +1514,8 @@ byte color_table2[] = { 0, 4, 1, 5, 2, 6, 3, 7};
 
 byte cpm_const( void)
 {
-#ifdef __linux__
-	if (kbhit()) 
+#ifndef _WIN32
+	if (kbhit())
 		return 0xff;
 	else
 		return 0;
@@ -1518,7 +1523,7 @@ byte cpm_const( void)
 		DWORD t;
     static DWORD t0, ct;
 
-    if ( conin  ? kbhit() 
+    if ( conin  ? kbhit()
 		: WaitForSingleObject( hStdIn, 0) != WAIT_TIMEOUT) {
 	return 0xff;
     }
@@ -1533,7 +1538,7 @@ byte cpm_const( void)
 #endif
 }
 
-#ifdef __linux__
+#ifndef _WIN32
 void my_handler(int s){
 //    printf("^C\r\n");
 }
@@ -1615,7 +1620,7 @@ void toggleInvertion(void) {
 }
 void cpm_conio_setup( void)
 {
-#ifdef __linux__
+#ifndef _WIN32
 	set_conio_terminal_mode();
 	conout = TRUE;									/* TODO */
 	conin = TRUE;
@@ -1640,7 +1645,7 @@ void toggleInvertion(void) {
 
 void cpm_conio_restore( void)
 {
-#ifdef __linux__
+#ifndef _WIN32
 	reset_terminal_mode();
 #endif
 }
@@ -1650,7 +1655,7 @@ void cpm_conio_restore( void)
 static int getch( void)
 {
     static unsigned keybuf = 0;
-    static unsigned char ctltbl[] = { 
+    static unsigned char ctltbl[] = {
       0x84-0x49, 0x76-0x51, 0x75-0x4f, 0x77-0x47, // PgUP, PgDOWN, End, Home,
       0x73-0x4b, 0x8d-0x48, 0x74-0x4d, 0x91-0x50, // LEFT, UP, RIGHT, DOWN,
       0,         0,         0,    0,
@@ -1662,9 +1667,9 @@ static int getch( void)
     INPUT_RECORD evt;
 //  HANDLE hStdIn = GetStdHandle( STD_INPUT_HANDLE);
 
-    if ( keybuf) { 
-        c = (unsigned char)keybuf; 
-        keybuf >>= 8; 
+    if ( keybuf) {
+        c = (unsigned char)keybuf;
+        keybuf >>= 8;
         return c;
     }
 
@@ -1679,9 +1684,9 @@ static int getch( void)
 			c = (BYTE)key->uChar.AsciiChar;
 			if ( c) break;
 			if ( k >= 0x21 && k <= 0x2e) {  // extend keys
-				if ( st & (RIGHT_ALT_PRESSED  | LEFT_ALT_PRESSED)) 
+				if ( st & (RIGHT_ALT_PRESSED  | LEFT_ALT_PRESSED))
 				    s += 0x50;
-				else if ( st & (RIGHT_CTRL_PRESSED | LEFT_CTRL_PRESSED)) 
+				else if ( st & (RIGHT_CTRL_PRESSED | LEFT_CTRL_PRESSED))
 				    s += ctltbl[ k - 0x21];
 				keybuf = s;
 				break;
@@ -1697,7 +1702,7 @@ static int getch( void)
 				break;
 			}
 		}
-	
+
     }
     SetConsoleMode( hStdIn, mode);
 
@@ -1717,8 +1722,8 @@ byte cpm_getch( void)
 {
     int c, ch, ch2;
     if ( conin) {
-#ifdef __linux__
-	  if (( c=cpull()) == CON_BUF_EMPTY)		
+#ifndef _WIN32
+	  if (( c=cpull()) == CON_BUF_EMPTY)
 	    if (( c = getch()) == 27) {		/* ESC */
 		  if (kbhit()) {
 			if ((ch=getch()) == '[') {
@@ -1826,8 +1831,8 @@ byte cpm_getche( void)
 
     c = cpm_getch();
     if ( conin) {
-#ifdef __linux__
-	w32_putch(c);  
+#ifndef _WIN32
+	w32_putch(c);
 #else
     DWORD n;
 
@@ -1868,7 +1873,7 @@ void cpm_putch( int c)
 {
     static byte esc_stat, arg_n;
     static byte args[ 8], ct, cb;
-#ifndef __linux__
+#ifdef _WIN32
     word cc;
     word t;
 #endif
@@ -1895,20 +1900,20 @@ void cpm_putch( int c)
 				case 0x14: w32_cls( 0);							/* R1715 CLReos */
 						break;
 				case 0x15: w32_right();							/* R1715 RIGHT */
-						break; 
+						break;
 				case '\x0c': if (R1715) {
 									w32_cls( 2);
 									w32_gotoxy(1,1);
 								}
-								else if (adm3a) w32_right(); 
+								else if (adm3a) w32_right();
 								else w32_left();
 							break;
 				case '\x19': if (ordfile)
-								w32_up(); 
+								w32_up();
 							break;
-				case '\x1b': esc_stat = ST_ESC; 
+				case '\x1b': esc_stat = ST_ESC;
 							break;
-				case '\x1a': if (R1715) 
+				case '\x1a': if (R1715)
 								w32_up();
 							 else if (ordfile)
 								w32_down();
@@ -1932,7 +1937,7 @@ void cpm_putch( int c)
 								w32_right();
 							        break;
                                                         }
-							if (!adm3a) break;	
+							if (!adm3a) break;
 				case 5:											/* adm3a clear to eol */
 					w32_clrln( 0);
 					break;
@@ -1951,7 +1956,7 @@ void cpm_putch( int c)
 						 else {
 							 if ((c>=0x80)&&(c<=0xff)) {
 								if (!NoKOI) c=oriKoi[c & 0x7f];
-#ifdef __linux__
+#ifndef _WIN32
 							 	/* MSDOS russian & pseudograph to ASCII */
 								if ((c>=0xb0)&&(c<0xe0)) putchar('\xe2');
 								putchar((char)(ruspseudo[c & 0x7f]>>8));
@@ -1987,18 +1992,18 @@ void cpm_putch( int c)
 						setTextNoInverted();
 						inverted=FALSE;
 						break;
-					case '*': w32_cls( 2); 
+					case '*': w32_cls( 2);
 							break;
 					case ':': setCursorOn();
 							break;
 					case ';': setCursorOff();
-							break;	
+							break;
 					case 'P': 										/* 2019/ VT52 of ORION-128: colors  1=blue, 2=green, 4=red */
 						ct=c & GREEN_TXT;							/*TODO								1=red,  2=green, 4=blue */
 						if (c & 1) ct+=BLUE_TXT;
 						if (c & 4) ct+=RED_TXT;
 						if (c & 8)
-#ifdef __linux__
+#ifndef _WIN32
 						    setTextColorBright(ct);			/* ORION-128: 8=intence */
 					    else setTextColor(ct);
 #else
@@ -2009,7 +2014,7 @@ void cpm_putch( int c)
 						if (c & 1) cb+=BLUE_TXT;
 						if (c & 4) cb+=RED_TXT;
 						if (c & 8)
-#ifdef __linux__
+#ifndef _WIN32
 						     setBackgroundColorBright(cb);
 						else setBackgroundColor(cb);
 #else
@@ -2042,7 +2047,7 @@ void cpm_putch( int c)
 							w32_left();
 						else w32_down();
 						break;
-					case 'H': w32_gotoxy(1,1);  					/* 2019/ VT52 of ORION-128:  HOME (без очистки экрана) */
+					case 'H': w32_gotoxy(1,1);  					/* 2019/ VT52 of ORION-128:  HOME (пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ) */
 							break;
 					case 'E': if (! adm3a) {				/* 2019/ VT52 of ORION-128:  CLS */
 								w32_cls( 2);
@@ -2058,17 +2063,17 @@ void cpm_putch( int c)
 							  args[ 0] = args[ 1] = 0;
 							  esc_stat = ST_ANSI;
 						return;
-					case '(': 
+					case '(':
 						setTextBold();
 						break;
 					case ')':
 						setTextNoBold();
 						break;
 					case 't':
-					case 'K':                                        /* 2019/ VT52 of ORION-128: CLREOL - стирание до конца строки (вкл-я позицию курсора) */
+					case 'K':                                        /* 2019/ VT52 of ORION-128: CLREOL - пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅ-пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ) */
 					case 'T': w32_clrln( 0);
 						break;
-					case 'J':                                        /* 2019/ VT52 of ORION-128: CLREOS - стирание до конца экрана (включая позицию курсора) */
+					case 'J':                                        /* 2019/ VT52 of ORION-128: CLREOS - пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ) */
 					case 'y': w32_cls( 0);
 						break;   // 2012.03 add
 					default: if (debug_flag) printf( "ESC%c", c);
@@ -2244,8 +2249,8 @@ void cpm_putch( int c)
 					} else if ( c == 4) {
 						a |= COMMON_LVB_UNDERSCORE;
 					}
-				}			
-#ifdef __linux__
+				}
+#ifndef _WIN32
 				if ( a & FOREGROUND_INTENSITY) setTextBold();
 					else setTextNoBold();
 				if ( a & COMMON_LVB_REVERSE_VIDEO) setTextInverted();
@@ -2297,7 +2302,7 @@ int main( int argc, char *argv[])
 	char hexbuf[6];
     char *arg1, *arg2;
     Z80reset();
-#ifdef __linux__
+#ifndef _WIN32
     if (getcwd(StartDir, sizeof(StartDir)-1) == NULL) {
        perror("getcwd() error");
        return -1;
@@ -2332,7 +2337,7 @@ int main( int argc, char *argv[])
 
     if ( !load_program( argv[ i])) {
         fprintf( stderr, "ERROR: program `%s`{.cpm;.com} not found.\n", argv[ i]);
-#ifdef __linux__
+#ifndef _WIN32
 		fprintf( stderr, "Be careful of case sensitive typeing (or use -C key)!\n");
 #endif
         return -1;
@@ -2406,10 +2411,10 @@ int main( int argc, char *argv[])
     mem[ p++] = 0xED; mem[ p++] = 0xED;                      /* SPECIAL OPCODE */
     mem[ p++] = 0xC9;				             /*   RET */
   } /* if ordfile==0 */
-	
+
     /* emulation start */
     cpm_conio_setup();
-#ifdef __linux__
+#ifndef _WIN32
    struct sigaction sigIntHandler;
    sigIntHandler.sa_handler = my_handler;
    sigemptyset(&sigIntHandler.sa_mask);
@@ -2678,7 +2683,7 @@ DEBUGOUT( stderr, " with 0 -> %02x\n", /* reg.b.l */ (byte)HL);
 			} /* switch */
 	    } else if (orion128 && ((word)PC >= (p=ROM_ORG)) ) {			/* -- ROM F800 CALL -- */
 			switch ( q=((word)PrevPC-(word)p) ) {
-				case  0: goto cpm_exit;									/* cold boot */       
+				case  0: goto cpm_exit;									/* cold boot */
 				case  3: ((byte*)&AF)[1] = cpm_getch();					/* conin */
 				case  6:												/* tape byte in */
 				case 12:												/* tape byte out */
@@ -2692,13 +2697,13 @@ DEBUGOUT( stderr, " with 0 -> %02x\n", /* reg.b.l */ (byte)HL);
 					break;
 				case  9: cpm_putch( (byte)BC);							/* conout */
 					break;
-				case 15: cpm_putch( ((byte*)&AF)[1]);	
+				case 15: cpm_putch( ((byte*)&AF)[1]);
 					break;
 				case 0x12: ((byte*)&AF)[1] = cpm_const();
 					break;
 				case 0x15:												/* print HEX from A */
 					sprintf( hexbuf, "%.2x", (0xffff & AF)>>8 );
-					cpm_putch( hexbuf[1]);	
+					cpm_putch( hexbuf[1]);
 					cpm_putch( hexbuf[2]);
 					break;
 				case 0x18:												/* string out */
@@ -2710,7 +2715,7 @@ DEBUGOUT( stderr, " with 0 -> %02x\n", /* reg.b.l */ (byte)HL);
 					break;
 				case 0x1e:
 					w32_savexy();
- 					((byte*)&HL)[1] = cpm_cur.Y;			/* H = cursor row */ 
+ 					((byte*)&HL)[1] = cpm_cur.Y;			/* H = cursor row */
 					((byte*)&HL)[0] = cpm_cur.X;			/* L = cursor col */
 					break;
 				case 0x30:												/* get RAMTOP */
