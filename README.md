@@ -29,6 +29,7 @@ Copyright (C) 2004-2012 by K.Murakami
 ``` 
 
 Environment variables:
+```
 CPMPATH - default CP/M binaries dir
 ORDPATH - default ORDOS binaries dir (Orion-128 mode)
-
+```
