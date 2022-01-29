@@ -78,8 +78,8 @@ Comments=
 DebugSourceDirs=$(BCB)\source\vcl
 
 [Parameters]
-RunParams=rccp
-HostApplication=
+RunParams=sed
+HostApplication=C:\Windows\System32\cmd.exe
 RemoteHost=
 RemotePath=
 RemoteDebug=0

@@ -209,6 +209,7 @@ word cpm_dma_addr = 0x80;
 word cpm_version = 0x22;
 word cpm_disk_vct = 0;
 char *cpm_drive[ MAXDRV];
+char *cpmdrv0=NULL;
 
 int abort_submit;
 
@@ -218,6 +219,7 @@ char StartDir[PATH_MAX+1];
 char filename[ 1024];
 char filename2[ 1024];
 
+#define freedrv if(cpmdrv0){free(cpmdrv0);cpmdrv0=NULL;}
 #define CPMPATH "CPMPATH"
 #define ORDPATH "ORDPATH"
 
@@ -517,13 +519,12 @@ int load_program( char *pfile)
 	fclose( fp);
     if ( stricmp( ext, "COM") == 0)
 		cpm_version = 0x122;
-    cpm_drive[ 0] = (char *)malloc( strlen( drv) + strlen( dir) + 1);
+    cpmdrv0 = cpm_drive[ 0] = (char *)malloc( strlen( drv) + strlen( dir) + 1);
 #ifdef __linux__
 	strcpy( cpm_drive[ 0], dir);
 #else
 	_makepath( cpm_drive[ 0], drv, dir, NULL, NULL);
 #endif
-//    cpm_drive[ 1] = "";
     return TRUE;
 }
 
@@ -1613,7 +1614,8 @@ void toggleInvertion(void) {
 	    inverted=TRUE;
 	}
 }
-void cpm_conio_setup( void)
+
+void cpm_conio_setup( void)
 {
 #ifdef __linux__
 	set_conio_terminal_mode();
@@ -2294,9 +2296,10 @@ void help( void)
 int main( int argc, char *argv[])
 {
     int st, i, p, q;
-	char hexbuf[6];
+    char hexbuf[6];
     char *arg1, *arg2;
     Z80reset();
+    cpm_drive[ 1] = "";
 #ifdef __linux__
     if (getcwd(StartDir, sizeof(StartDir)-1) == NULL) {
        perror("getcwd() error");
@@ -2358,8 +2361,7 @@ int main( int argc, char *argv[])
 
     /* 2012.03 terminate on "=:;<>" */
     p = ( *arg1 && arg1[1] == ':') ? 2 : 0;
-    for (; (q
-            = arg1[ p]) != '\0' && !strchr("=:;<>", q); p++);
+    for (; (q = arg1[ p]) != '\0' && !strchr("=:;<>", q); p++);
     if ( q) {
         arg1[ p] = '\0';
         mkFCB( mem + 0x5c, arg1);
@@ -2431,10 +2433,12 @@ int main( int argc, char *argv[])
         if (StopCode) {
 	  if (StopCode==STOP_HALT) {			/* -- HALT -- */
 	    fprintf( stderr, "ERROR: Halted at %x.\n", PC-1);
+            freedrv ;
 	    return -1;
           }
 	  if (StopCode==STOP_OPCODE) {			/* -- OPCODE -- */
 	    fprintf( stderr, "ERROR: Wrong opcode at %x.\n", PC-1);
+            freedrv ;
 	    return -1;
           }
         }
@@ -2623,6 +2627,7 @@ DEBUGOUT( stderr, " with 0 -> %02x\n", /* reg.b.l */ (byte)HL);
 					cpm_exit:
 					if ( pause_flag) while ( cpm_getch() >= ' ');
 					cpm_conio_restore();
+                                        freedrv ;
 					return  retcode_flag == RC_HITECH ? *(word *)(mem + 0x80) : retcode_flag == RC_BDSC && abort_submit ? 2 : 0;
 				case  6:		/* const */                                     /* 2 */
 					((byte*)&AF)[1] = cpm_const();
@@ -2674,6 +2679,7 @@ DEBUGOUT( stderr, " with 0 -> %02x\n", /* reg.b.l */ (byte)HL);
 					break;
 				default:
 					if (q/3<=BIOS_CNT) fprintf( stderr, "ERROR: Unsupported BIOS call: %x(N%d)\n", (word)PrevPC, q/3);
+                                        freedrv ;
 					return -1;
 			} /* switch */
 	    } else if (orion128 && ((word)PC >= (p=ROM_ORG)) ) {			/* -- ROM F800 CALL -- */
@@ -2727,10 +2733,12 @@ DEBUGOUT( stderr, " with 0 -> %02x\n", /* reg.b.l */ (byte)HL);
 					break;
 				default:
 					if (q/3<=ROM_CNT) fprintf( stderr, "ERROR: Unsupported ROM F800 call: %x(N%d)\n", (word)PrevPC, q/3);
+                                        freedrv ;
 					return -1;
 			}
 		}
 	  }
 	}
+        freedrv ;
 	return 0;
 }
